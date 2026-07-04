@@ -21,7 +21,11 @@ pub enum ModelError {
     #[error("download failed: {0}")]
     Download(String),
     #[error("checksum mismatch for {file}: expected {expected}, got {actual}")]
-    ChecksumMismatch { file: String, expected: String, actual: String },
+    ChecksumMismatch {
+        file: String,
+        expected: String,
+        actual: String,
+    },
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("ollama unreachable at {url}: {reason}")]

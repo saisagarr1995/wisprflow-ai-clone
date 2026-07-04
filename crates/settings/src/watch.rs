@@ -77,11 +77,21 @@ impl SettingsHandle {
                     return;
                 }
                 // Reload and broadcast. Our own atomic saves also land here;
-                // `broadcast_if_changed` makes that a no-op. Editors that emit
-                // several events per save just cause a couple of cheap reloads.
-                match load_or_init(&path) {
-                    Ok(config) => broadcast_if_changed(&tx, config),
-                    Err(err) => tracing::warn!(%err, "config hot-reload failed"),
+                // `broadcast_if_changed` makes that a no-op. Read-only
+                // `try_load` (never load_or_init): a partially-written file
+                // mid-edit must not be "repaired" into defaults. Brief retry
+                // covers the window where the final write is still in flight.
+                for attempt in 0..3 {
+                    match crate::io::try_load(&path) {
+                        Ok(config) => {
+                            broadcast_if_changed(&tx, config);
+                            return;
+                        }
+                        Err(err) if attempt == 2 => {
+                            tracing::warn!(%err, "config hot-reload failed; keeping last good config");
+                        }
+                        Err(_) => std::thread::sleep(std::time::Duration::from_millis(25)),
+                    }
                 }
             })
             .map_err(|err| tracing::warn!(%err, "config watcher unavailable"))

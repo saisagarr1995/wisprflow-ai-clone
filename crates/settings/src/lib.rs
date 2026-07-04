@@ -12,6 +12,6 @@ mod migrate;
 mod schema;
 mod watch;
 
-pub use io::{config_path, default_config_dir, load_or_init, save_atomic, SettingsError};
+pub use io::{config_path, default_config_dir, load_or_init, save_atomic, try_load, SettingsError};
 pub use schema::*;
 pub use watch::SettingsHandle;

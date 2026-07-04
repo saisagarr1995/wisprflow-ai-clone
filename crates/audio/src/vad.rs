@@ -84,7 +84,8 @@ impl Vad for SileroVad {
 
         let (_, new_state) = outputs["stateN"].try_extract_tensor::<f32>()?;
         self.state.copy_from_slice(new_state);
-        self.context.copy_from_slice(&frame[VAD_FRAME_SAMPLES - CONTEXT_SAMPLES..]);
+        self.context
+            .copy_from_slice(&frame[VAD_FRAME_SAMPLES - CONTEXT_SAMPLES..]);
         let (_, prob) = outputs["output"].try_extract_tensor::<f32>()?;
         Ok(prob[0])
     }

@@ -55,7 +55,11 @@ mod tests {
             assert_eq!(m.sha256.len(), 64, "{} sha256 malformed", m.id);
             assert!(m.url.starts_with("https://"), "{} url must be https", m.id);
             assert!(m.size_bytes > 0);
-            assert!(!m.file.contains(['/', '\\']), "{} file must be a bare name", m.id);
+            assert!(
+                !m.file.contains(['/', '\\']),
+                "{} file must be a bare name",
+                m.id
+            );
         }
     }
 

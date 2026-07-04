@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "openflow-inject"
 version.workspace = true
 edition.workspace = true
@@ -6,3 +6,12 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+arboard = "3"
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_UI_Input_KeyboardAndMouse",
+] }

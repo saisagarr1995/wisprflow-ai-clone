@@ -53,7 +53,11 @@ impl BlobServer {
                 }
             }
         });
-        Self { url: format!("http://{addr}/blob"), stop, handle: Some(handle) }
+        Self {
+            url: format!("http://{addr}/blob"),
+            stop,
+            handle: Some(handle),
+        }
     }
 }
 

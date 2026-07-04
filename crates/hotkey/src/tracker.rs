@@ -14,7 +14,11 @@ pub struct ChordTracker {
 
 impl ChordTracker {
     pub fn new(chord: Chord) -> Self {
-        Self { chord, down: HashSet::new(), active: false }
+        Self {
+            chord,
+            down: HashSet::new(),
+            active: false,
+        }
     }
 
     /// `pressed=true` for key-down, `false` for key-up.
@@ -39,7 +43,10 @@ impl ChordTracker {
     }
 
     fn chord_satisfied(&self) -> bool {
-        self.chord.keys.iter().all(|m| self.down.iter().any(|&k| m.matches(k)))
+        self.chord
+            .keys
+            .iter()
+            .all(|m| self.down.iter().any(|&k| m.matches(k)))
     }
 }
 

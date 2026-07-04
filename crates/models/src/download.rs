@@ -47,7 +47,13 @@ pub fn ensure_entry(
         start_at = 0;
     }
 
-    download_into(&entry.url, &part, start_at, entry.size_bytes, &mut on_progress)?;
+    download_into(
+        &entry.url,
+        &part,
+        start_at,
+        entry.size_bytes,
+        &mut on_progress,
+    )?;
 
     let actual = file_sha256(&part)?;
     if actual != entry.sha256 {
@@ -65,7 +71,10 @@ pub fn ensure_entry(
 }
 
 fn ext_of(file: &str) -> &str {
-    Path::new(file).extension().and_then(|e| e.to_str()).unwrap_or("bin")
+    Path::new(file)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("bin")
 }
 
 fn download_into(
@@ -84,7 +93,9 @@ fn download_into(
     if start_at > 0 {
         req = req.header(reqwest::header::RANGE, format!("bytes={start_at}-"));
     }
-    let mut resp = req.send().map_err(|e| ModelError::Download(e.to_string()))?;
+    let mut resp = req
+        .send()
+        .map_err(|e| ModelError::Download(e.to_string()))?;
     if !resp.status().is_success() {
         return Err(ModelError::Download(format!("{} for {url}", resp.status())));
     }
@@ -95,13 +106,20 @@ fn download_into(
         start_at
     };
 
-    let mut file = OpenOptions::new().create(true).write(true).open(part)?;
+    // truncate(false): resuming appends after the seek; set_len below trims.
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(part)?;
     file.seek(SeekFrom::Start(downloaded))?;
     file.set_len(downloaded)?;
 
     let mut buf = [0u8; 64 * 1024];
     loop {
-        let n = resp.read(&mut buf).map_err(|e| ModelError::Download(e.to_string()))?;
+        let n = resp
+            .read(&mut buf)
+            .map_err(|e| ModelError::Download(e.to_string()))?;
         if n == 0 {
             break;
         }
@@ -125,4 +143,3 @@ fn file_sha256(path: &Path) -> Result<String, ModelError> {
     }
     Ok(format!("{:x}", hasher.finalize()))
 }
-

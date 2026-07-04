@@ -8,8 +8,7 @@ use std::path::{Path, PathBuf};
 use openflow_stt::{SttEngine, TranscribeOpts, WhisperEngine};
 
 fn load_jfk() -> Vec<f32> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../audio/tests/fixtures/jfk.wav");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../audio/tests/fixtures/jfk.wav");
     let mut reader = hound::WavReader::open(path).unwrap();
     reader
         .samples::<i16>()
@@ -27,7 +26,13 @@ fn transcribes_jfk_with_reasonable_accuracy() {
     let model = model_path().expect("set OPENFLOW_WHISPER_MODEL to run this test");
     let mut engine = WhisperEngine::from_file(&model).unwrap();
     let transcript = engine
-        .transcribe(&load_jfk(), &TranscribeOpts { language: Some("en".into()), ..Default::default() })
+        .transcribe(
+            &load_jfk(),
+            &TranscribeOpts {
+                language: Some("en".into()),
+                ..Default::default()
+            },
+        )
         .unwrap();
 
     let text = transcript.text.to_lowercase();

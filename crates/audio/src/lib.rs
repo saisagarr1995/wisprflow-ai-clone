@@ -18,7 +18,7 @@ pub use engine::AudioEngine;
 pub use fake::FakeAudioSource;
 pub use resample::Resampler;
 pub use ring::RollingBuffer;
-pub use source::{list_input_devices, AudioError, AudioSource, CpalSource};
+pub use source::{list_input_devices, AudioError, AudioSink, AudioSource, CpalSource};
 pub use vad::{
     trim_silence, EndPointer, SileroVad, Vad, VadError, SPEECH_THRESHOLD, VAD_FRAME_SAMPLES,
 };

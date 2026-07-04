@@ -60,7 +60,11 @@ fn trim_removes_padded_silence() {
     assert!(!range.is_empty(), "speech should be detected");
     // >90% of each 2 s silence pad must be outside the kept range.
     let pad_len = pad.len();
-    assert!(range.start > pad_len * 9 / 10, "leading silence kept: starts at {}", range.start);
+    assert!(
+        range.start > pad_len * 9 / 10,
+        "leading silence kept: starts at {}",
+        range.start
+    );
     assert!(
         range.end < audio.len() - pad_len * 9 / 10,
         "trailing silence kept: ends at {} of {}",

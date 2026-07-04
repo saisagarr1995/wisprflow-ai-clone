@@ -16,10 +16,13 @@ pub enum AudioError {
     Backend(String),
 }
 
+/// Receives 16 kHz mono chunks on a non-realtime thread owned by the source.
+pub type AudioSink = Box<dyn FnMut(&[f32]) + Send>;
+
 /// A source of 16 kHz mono f32 audio. The sink is invoked with small chunks
 /// (~10–30 ms) on a non-realtime thread owned by the source.
 pub trait AudioSource: Send {
-    fn start(&mut self, sink: Box<dyn FnMut(&[f32]) + Send>) -> Result<(), AudioError>;
+    fn start(&mut self, sink: AudioSink) -> Result<(), AudioError>;
     fn stop(&mut self);
 }
 
@@ -65,7 +68,7 @@ impl CpalSource {
 }
 
 impl AudioSource for CpalSource {
-    fn start(&mut self, mut sink: Box<dyn FnMut(&[f32]) + Send>) -> Result<(), AudioError> {
+    fn start(&mut self, mut sink: AudioSink) -> Result<(), AudioError> {
         let device = self.pick_device()?;
         let config = device
             .default_input_config()
@@ -99,7 +102,9 @@ impl AudioSource for CpalSource {
                 None,
             )
             .map_err(|e| AudioError::Backend(e.to_string()))?;
-        stream.play().map_err(|e| AudioError::Backend(e.to_string()))?;
+        stream
+            .play()
+            .map_err(|e| AudioError::Backend(e.to_string()))?;
 
         self.running.store(true, Ordering::Release);
         let running = self.running.clone();

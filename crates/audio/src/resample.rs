@@ -38,7 +38,12 @@ impl Resampler {
             )
         };
         let chunk_in = inner.as_ref().map(|r| r.input_frames_next()).unwrap_or(0);
-        Self { inner, channels, pending: Vec::new(), chunk_in }
+        Self {
+            inner,
+            channels,
+            pending: Vec::new(),
+            chunk_in,
+        }
     }
 
     /// Feed interleaved input; returns whatever 16 kHz mono output is ready.
@@ -80,7 +85,10 @@ mod tests {
     }
 
     fn dominant_freq_by_zero_crossings(samples: &[f32], rate: u32) -> f32 {
-        let crossings = samples.windows(2).filter(|w| w[0] <= 0.0 && w[1] > 0.0).count();
+        let crossings = samples
+            .windows(2)
+            .filter(|w| w[0] <= 0.0 && w[1] > 0.0)
+            .count();
         crossings as f32 / (samples.len() as f32 / rate as f32)
     }
 
@@ -89,9 +97,16 @@ mod tests {
         let mut rs = Resampler::new(48_000, 1);
         let out = rs.process(&sine(48_000, 440.0, 1.0));
         // ~16000 samples out for 1 s in, modulo one internal chunk of latency.
-        assert!((14_000..=16_100).contains(&out.len()), "got {} samples", out.len());
+        assert!(
+            (14_000..=16_100).contains(&out.len()),
+            "got {} samples",
+            out.len()
+        );
         let f = dominant_freq_by_zero_crossings(&out, TARGET_SAMPLE_RATE);
-        assert!((f - 440.0).abs() < 15.0, "dominant frequency drifted: {f} Hz");
+        assert!(
+            (f - 440.0).abs() < 15.0,
+            "dominant frequency drifted: {f} Hz"
+        );
     }
 
     #[test]

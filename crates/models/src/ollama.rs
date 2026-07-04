@@ -30,16 +30,26 @@ pub fn check_ollama(base_url: &str, required: &[&str]) -> Result<OllamaStatus, M
         .timeout(std::time::Duration::from_secs(5))
         .send()
         .and_then(|r| r.error_for_status())
-        .map_err(|e| ModelError::OllamaUnreachable { url: url.clone(), reason: e.to_string() })?;
+        .map_err(|e| ModelError::OllamaUnreachable {
+            url: url.clone(),
+            reason: e.to_string(),
+        })?;
 
-    let tags: TagsResponse = resp
-        .json()
-        .map_err(|e| ModelError::OllamaUnreachable { url, reason: format!("bad response: {e}") })?;
+    let tags: TagsResponse = resp.json().map_err(|e| ModelError::OllamaUnreachable {
+        url,
+        reason: format!("bad response: {e}"),
+    })?;
 
     let available: Vec<String> = tags.models.into_iter().map(|m| m.name).collect();
     let missing = required
         .iter()
-        .filter(|req| !available.iter().any(|have| have == *req || have.starts_with(&format!("{req}:")) || req.starts_with(&format!("{have}:"))))
+        .filter(|req| {
+            !available.iter().any(|have| {
+                have == *req
+                    || have.starts_with(&format!("{req}:"))
+                    || req.starts_with(&format!("{have}:"))
+            })
+        })
         .map(|s| s.to_string())
         .collect();
 

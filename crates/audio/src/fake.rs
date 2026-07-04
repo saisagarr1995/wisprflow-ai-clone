@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::source::{AudioError, AudioSource};
+use crate::source::{AudioError, AudioSink, AudioSource};
 use crate::TARGET_SAMPLE_RATE;
 
 /// Test/dev source that feeds pre-recorded 16 kHz mono samples to the sink in
@@ -63,7 +63,7 @@ impl FakeAudioSource {
 }
 
 impl AudioSource for FakeAudioSource {
-    fn start(&mut self, mut sink: Box<dyn FnMut(&[f32]) + Send>) -> Result<(), AudioError> {
+    fn start(&mut self, mut sink: AudioSink) -> Result<(), AudioError> {
         const CHUNK: usize = (TARGET_SAMPLE_RATE as usize) / 50; // 20 ms
         let samples = self.samples.clone();
         let realtime = self.realtime;

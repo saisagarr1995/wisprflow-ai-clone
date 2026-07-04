@@ -57,6 +57,15 @@ pub fn load_or_init(path: &Path) -> Result<Config, SettingsError> {
     }
 }
 
+/// Read-only load: parses and migrates in memory but never writes, backs up,
+/// or "repairs" the file. The hot-reload watcher uses this because it can
+/// observe partially-written files mid-edit; destroying the user's edit by
+/// "fixing" a transient parse failure is the one unforgivable outcome.
+pub fn try_load(path: &Path) -> Result<Config, SettingsError> {
+    let raw = fs::read_to_string(path)?;
+    parse_and_migrate(&raw).map(|(config, _)| config)
+}
+
 fn parse_and_migrate(raw: &str) -> Result<(Config, bool), SettingsError> {
     let value: serde_json::Value = serde_json::from_str(raw)?;
     let version = value.get("version").and_then(|v| v.as_u64()).unwrap_or(0) as u32;

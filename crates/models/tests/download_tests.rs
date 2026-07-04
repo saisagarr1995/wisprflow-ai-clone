@@ -47,8 +47,15 @@ fn checksum_mismatch_rejects_and_cleans_up() {
     let entry = entry_for(&server.url, &blob, "0".repeat(64));
 
     let err = ensure_entry(&entry, dir.path(), |_| {}).unwrap_err();
-    assert!(matches!(err, ModelError::ChecksumMismatch { .. }), "got {err:?}");
-    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0, "partial not cleaned");
+    assert!(
+        matches!(err, ModelError::ChecksumMismatch { .. }),
+        "got {err:?}"
+    );
+    assert_eq!(
+        std::fs::read_dir(dir.path()).unwrap().count(),
+        0,
+        "partial not cleaned"
+    );
 }
 
 #[test]
@@ -68,7 +75,10 @@ fn resumes_partial_download() {
     .unwrap();
     assert_eq!(std::fs::read(&path).unwrap(), blob);
     // Progress started beyond the existing 25k, proving the Range resume.
-    assert!(first_progress.unwrap() > 25_000, "resume did not happen: {first_progress:?}");
+    assert!(
+        first_progress.unwrap() > 25_000,
+        "resume did not happen: {first_progress:?}"
+    );
 }
 
 #[test]

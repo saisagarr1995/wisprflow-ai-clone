@@ -18,3 +18,12 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+openflow-audio = { path = "../../../crates/audio" }
+openflow-core = { path = "../../../crates/core" }
+openflow-hotkey = { path = "../../../crates/hotkey" }
+openflow-inject = { path = "../../../crates/inject" }
+openflow-models = { path = "../../../crates/models" }
+openflow-settings = { path = "../../../crates/settings" }
+openflow-stt = { path = "../../../crates/stt" }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

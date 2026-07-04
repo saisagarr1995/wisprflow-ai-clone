@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "openflow-core"
 version.workspace = true
 edition.workspace = true
@@ -6,3 +6,9 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+openflow-audio = { path = "../audio" }
+openflow-inject = { path = "../inject" }
+openflow-settings = { path = "../settings" }
+openflow-stt = { path = "../stt" }
+thiserror = { workspace = true }
+tracing = { workspace = true }

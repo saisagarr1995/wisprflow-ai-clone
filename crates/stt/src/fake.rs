@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use crate::{SttEngine, SttError, Transcript, TranscribeOpts};
+use crate::{SttEngine, SttError, TranscribeOpts, Transcript};
 
 /// Canned-response engine for headless pipeline tests. Returns queued
 /// transcripts in order (repeating the last one when exhausted) and records

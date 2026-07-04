@@ -38,8 +38,7 @@ impl AudioEngine {
         let level_bits = self.level_bits.clone();
         self.source.start(Box::new(move |chunk: &[f32]| {
             history.lock().expect("history lock").push(chunk);
-            let rms =
-                (chunk.iter().map(|s| s * s).sum::<f32>() / chunk.len().max(1) as f32).sqrt();
+            let rms = (chunk.iter().map(|s| s * s).sum::<f32>() / chunk.len().max(1) as f32).sqrt();
             level_bits.store(rms.to_bits(), Ordering::Relaxed);
         }))
     }
@@ -106,8 +105,9 @@ mod tests {
 
     #[test]
     fn end_without_begin_returns_none() {
-        let mut engine =
-            AudioEngine::new(Box::new(FakeAudioSource::new(vec![0.0; 100]).loop_silence(false)));
+        let mut engine = AudioEngine::new(Box::new(
+            FakeAudioSource::new(vec![0.0; 100]).loop_silence(false),
+        ));
         engine.start().unwrap();
         assert!(engine.end_session().is_none());
     }

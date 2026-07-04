@@ -62,15 +62,14 @@ impl HotkeyListener {
             .name("openflow-hotkey".into())
             .spawn(move || {
                 HOOK_STATE.with(|s| *s.borrow_mut() = Some((ChordTracker::new(chord), tx)));
-                let hook = match unsafe {
-                    SetWindowsHookExW(WH_KEYBOARD_LL, Some(hook_proc), None, 0)
-                } {
-                    Ok(h) => h,
-                    Err(e) => {
-                        let _ = ready_tx.send(Err(HotkeyError::HookInstall(e.to_string())));
-                        return;
-                    }
-                };
+                let hook =
+                    match unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(hook_proc), None, 0) } {
+                        Ok(h) => h,
+                        Err(e) => {
+                            let _ = ready_tx.send(Err(HotkeyError::HookInstall(e.to_string())));
+                            return;
+                        }
+                    };
                 let _ = ready_tx.send(Ok(unsafe { GetCurrentThreadId() }));
 
                 let mut msg = MSG::default();
@@ -88,7 +87,10 @@ impl HotkeyListener {
         let thread_id = ready_rx
             .recv()
             .map_err(|_| HotkeyError::HookInstall("hook thread died during setup".into()))??;
-        Ok(Self { thread_id, thread: Some(thread) })
+        Ok(Self {
+            thread_id,
+            thread: Some(thread),
+        })
     }
 }
 

@@ -103,7 +103,10 @@ mod tests {
 
     #[test]
     fn parses_common_chords() {
-        assert_eq!(parse_chord("RCtrl").unwrap().keys, vec![KeyMatcher::Exact(vk::RCTRL)]);
+        assert_eq!(
+            parse_chord("RCtrl").unwrap().keys,
+            vec![KeyMatcher::Exact(vk::RCTRL)]
+        );
         assert_eq!(
             parse_chord("Ctrl+Shift+Space").unwrap().keys,
             vec![
@@ -112,15 +115,24 @@ mod tests {
                 KeyMatcher::Exact(vk::SPACE),
             ]
         );
-        assert_eq!(parse_chord("F9").unwrap().keys, vec![KeyMatcher::Exact(0x78)]);
+        assert_eq!(
+            parse_chord("F9").unwrap().keys,
+            vec![KeyMatcher::Exact(0x78)]
+        );
         assert_eq!(parse_chord("Alt+Z").unwrap().keys.len(), 2);
         assert_eq!(parse_chord("alt + z").unwrap().keys.len(), 2);
     }
 
     #[test]
     fn rejects_garbage() {
-        assert_eq!(parse_chord("Bogus").unwrap_err(), ParseError::UnknownKey("Bogus".into()));
+        assert_eq!(
+            parse_chord("Bogus").unwrap_err(),
+            ParseError::UnknownKey("Bogus".into())
+        );
         assert_eq!(parse_chord("").unwrap_err(), ParseError::Empty);
-        assert_eq!(parse_chord("F25").unwrap_err(), ParseError::UnknownKey("F25".into()));
+        assert_eq!(
+            parse_chord("F25").unwrap_err(),
+            ParseError::UnknownKey("F25".into())
+        );
     }
 }

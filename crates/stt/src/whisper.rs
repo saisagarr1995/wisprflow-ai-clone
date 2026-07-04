@@ -2,7 +2,7 @@ use std::path::Path;
 
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
-use crate::{SttEngine, SttError, Transcript, TranscribeOpts};
+use crate::{SttEngine, SttError, TranscribeOpts, Transcript};
 
 /// whisper.cpp backend. CPU-only for now; GPU feature flags land with the
 /// performance pass (design doc §11) so early phases stay easy to build.
@@ -15,9 +15,9 @@ impl WhisperEngine {
     pub fn from_file(model_path: &Path) -> Result<Self, SttError> {
         let params = WhisperContextParameters::default();
         let context = WhisperContext::new_with_params(
-            model_path.to_str().ok_or_else(|| {
-                SttError::ModelLoad("model path is not valid UTF-8".into())
-            })?,
+            model_path
+                .to_str()
+                .ok_or_else(|| SttError::ModelLoad("model path is not valid UTF-8".into()))?,
             params,
         )
         .map_err(|e| SttError::ModelLoad(e.to_string()))?;
@@ -25,7 +25,10 @@ impl WhisperEngine {
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "unknown".into());
-        Ok(Self { context, model_name })
+        Ok(Self {
+            context,
+            model_name,
+        })
     }
 }
 
