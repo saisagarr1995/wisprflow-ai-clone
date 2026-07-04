@@ -9,10 +9,14 @@
 mod fake;
 #[cfg(windows)]
 mod win_clipboard;
+#[cfg(windows)]
+mod win_keystroke;
 
 pub use fake::FakeInjector;
 #[cfg(windows)]
 pub use win_clipboard::ClipboardPasteInjector;
+#[cfg(windows)]
+pub use win_keystroke::{sanitize_for_terminal, KeystrokeInjector};
 
 #[derive(Debug, thiserror::Error)]
 pub enum InjectError {

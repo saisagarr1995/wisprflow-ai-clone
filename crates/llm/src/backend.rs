@@ -49,11 +49,14 @@ pub trait LlmBackend: Send + Sync {
     fn prewarm(&self, model: &str);
 }
 
+/// One recorded `chat` call: the model name and the messages sent.
+pub type RecordedCall = (String, Vec<ChatMessage>);
+
 /// Scripted backend for tests.
 #[derive(Clone, Default)]
 pub struct FakeLlm {
     responses: Arc<Mutex<VecDeque<Result<String, String>>>>,
-    pub calls: Arc<Mutex<Vec<(String, Vec<ChatMessage>)>>>,
+    pub calls: Arc<Mutex<Vec<RecordedCall>>>,
 }
 
 impl FakeLlm {

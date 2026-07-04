@@ -55,6 +55,9 @@ pub fn run() {
             commands::history_list,
             commands::history_delete,
             commands::history_clear,
+            commands::commands_list,
+            commands::commands_add,
+            commands::commands_delete,
         ])
         .setup(move |app| {
             let show = MenuItem::with_id(app, "show", "Settings", true, None::<&str>)?;
@@ -220,6 +223,15 @@ fn bootstrap_pipeline(
             cleanup,
             store: Some(store),
             context: Some(Box::new(openflow_context::WindowsContext)),
+            terminal_injector: Some(Box::new(openflow_inject::KeystrokeInjector::new(true))),
+            commands: if config.llm.enabled {
+                Some(openflow_core::CommandRuntime {
+                    backend: Box::new(openflow_llm::OllamaBackend::new(&config.llm.base_url)),
+                    commands: merged_commands(&app.state::<AppState>().store),
+                })
+            } else {
+                None
+            },
         },
         config.clone(),
         Callbacks {
@@ -238,6 +250,16 @@ fn bootstrap_pipeline(
                     }),
                 );
             })),
+            on_assistant: Some({
+                let app = app.clone();
+                Box::new(move |answer| show_assistant_popover(&app, answer))
+            }),
+            on_flash: Some({
+                let app = app.clone();
+                Box::new(move |msg| {
+                    let _ = app.emit("flash", msg);
+                })
+            }),
         },
     );
 
@@ -371,6 +393,65 @@ fn position_hud_bottom_center(hud: &tauri::WebviewWindow) {
     let x = mpos.x + (msize.width as i32 - size.width as i32) / 2;
     let y = mpos.y + msize.height as i32 - size.height as i32 - 96;
     let _ = hud.set_position(tauri::PhysicalPosition { x, y });
+}
+
+/// Built-in commands plus any the user defined in the store.
+fn merged_commands(store: &openflow_store::Store) -> Vec<openflow_llm::Command> {
+    let mut commands = openflow_llm::builtin_commands();
+    if let Ok(custom) = store.commands_list() {
+        for c in custom {
+            let output = match c.output_mode.as_str() {
+                "popover" => openflow_llm::OutputMode::Popover,
+                "insert" => openflow_llm::OutputMode::Insert,
+                _ => openflow_llm::OutputMode::Replace,
+            };
+            commands.push(openflow_llm::Command {
+                name: c.name,
+                triggers: c
+                    .triggers
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .collect(),
+                prompt_template: c.prompt,
+                task: openflow_llm::TaskKind::Rewrite,
+                output,
+            });
+        }
+    }
+    commands
+}
+
+/// Show the assistant's answer in a dedicated popover window (design doc §10:
+/// answers are never injected into the user's app).
+fn show_assistant_popover(app: &AppHandle, answer: String) {
+    let app2 = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let _ = app2.emit("assistant", &answer);
+        if let Some(win) = app2.get_webview_window("assistant") {
+            let _ = win.show();
+            let _ = win.set_focus();
+            return;
+        }
+        if let Ok(win) = WebviewWindowBuilder::new(
+            &app2,
+            "assistant",
+            WebviewUrl::App("index.html#assistant".into()),
+        )
+        .title("OpenFlow — Assistant")
+        .inner_size(460.0, 340.0)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .build()
+        {
+            // Re-emit once the window has had a moment to subscribe.
+            let win_app = app2.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+                let _ = win_app.emit("assistant", &answer);
+            });
+            let _ = win.show();
+        }
+    });
 }
 
 fn set_tooltip(app: &AppHandle, tip: String) {

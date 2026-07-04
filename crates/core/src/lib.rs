@@ -11,7 +11,7 @@ mod orchestrator;
 mod partial;
 
 pub use orchestrator::{
-    AudioFactory, Callbacks, DictationTiming, Orchestrator, OrchestratorHandle, Services,
-    SessionEvent, Status, SttFactory,
+    AudioFactory, Callbacks, CommandRuntime, DictationTiming, Orchestrator, OrchestratorHandle,
+    Services, SessionEvent, Status, SttFactory,
 };
 pub use partial::PartialWorker;

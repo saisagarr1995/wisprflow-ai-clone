@@ -8,12 +8,16 @@
 
 mod backend;
 mod cleanup;
+mod command;
 mod guard;
 mod ollama;
 mod router;
 
 pub use backend::{ChatMessage, FakeLlm, LlmBackend, LlmError};
 pub use cleanup::{CleanupContext, CleanupResult, CleanupService};
+pub use command::{
+    builtin_commands, match_command, run_command, Command, CommandMatch, OutputMode,
+};
 pub use guard::sanitize;
 pub use ollama::OllamaBackend;
 pub use router::{model_for, TaskKind};

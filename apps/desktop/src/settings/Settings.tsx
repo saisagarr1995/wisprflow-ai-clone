@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { useConfig } from "../lib/useConfig";
+import Commands from "./pages/Commands";
 import Dictionary from "./pages/Dictionary";
 import General from "./pages/General";
 import History from "./pages/History";
+import Latency from "./pages/Latency";
 import Microphone from "./pages/Microphone";
 import Models from "./pages/Models";
 import Snippets from "./pages/Snippets";
@@ -69,12 +71,15 @@ export default function Settings() {
         {active === "dictionary" && <Dictionary />}
         {active === "snippets" && <Snippets />}
         {active === "history" && <History />}
-        {!["general", "microphone", "models", "dictionary", "snippets", "history"].includes(
-          active,
-        ) && (
+        {active === "commands" && <Commands />}
+        {active === "latency" && <Latency />}
+        {active === "profiles" && (
           <div className="mt-24 text-center text-neutral-500">
-            <div className="text-lg">Coming right up</div>
-            <div className="mt-1 text-sm">This section is being built in a later phase.</div>
+            <div className="text-lg">Profiles</div>
+            <div className="mt-1 text-sm">
+              Per-app profiles are auto-applied today (chat, email, coding, terminal, document).
+              A profile editor UI is on the roadmap.
+            </div>
           </div>
         )}
       </main>

@@ -11,6 +11,7 @@ const BAR_COUNT = 36;
 export default function Hud() {
   const [status, setStatus] = useState<"recording" | "processing" | "idle">("idle");
   const [partial, setPartial] = useState("");
+  const [flash, setFlash] = useState<string | null>(null);
   const [bars, setBars] = useState<number[]>(() => Array(BAR_COUNT).fill(0.04));
   const levelsRef = useRef<number[]>(Array(BAR_COUNT).fill(0.04));
 
@@ -20,6 +21,7 @@ export default function Hud() {
       setStatus(e.payload as "recording" | "processing" | "idle");
       if (e.payload === "recording") {
         setPartial("");
+        setFlash(null);
         levelsRef.current = Array(BAR_COUNT).fill(0.04);
         setBars([...levelsRef.current]);
       }
@@ -30,8 +32,23 @@ export default function Hud() {
       setBars(next);
     }).then((u) => unsubs.push(u));
     listen<string>("partial", (e) => setPartial(e.payload)).then((u) => unsubs.push(u));
+    listen<string>("flash", (e) => {
+      setFlash(e.payload);
+      setTimeout(() => setFlash(null), 2200);
+    }).then((u) => unsubs.push(u));
     return () => unsubs.forEach((u) => u());
   }, []);
+
+  // A command flash (e.g. "shorten · 42 words") pre-empts the capsule.
+  if (flash) {
+    return (
+      <div className="flex h-screen w-screen items-end justify-center bg-transparent pb-6">
+        <div className="rounded-full bg-emerald-800 px-4 py-1.5 text-sm font-semibold text-emerald-50 shadow-lg">
+          ✓ {flash}
+        </div>
+      </div>
+    );
+  }
 
   const statePill =
     status === "recording"

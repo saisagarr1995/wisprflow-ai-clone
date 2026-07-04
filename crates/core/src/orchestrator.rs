@@ -59,15 +59,25 @@ pub struct Services {
     pub audio_factory: Option<AudioFactory>,
     /// LLM cleanup; `None` = deterministic transcripts only.
     pub cleanup: Option<openflow_llm::CleanupService>,
+    /// LLM backend + commands for voice-command transforms (design doc §10).
+    /// `None` disables command handling (dictation only).
+    pub commands: Option<CommandRuntime>,
     /// Dictionary/snippets/history; `None` = stateless dictation.
     pub store: Option<std::sync::Arc<openflow_store::Store>>,
     /// Focused-app awareness; `None` = generic tone, no focus-abort check.
     pub context: Option<Box<dyn openflow_context::ContextProvider>>,
+    /// Used instead of `injector` when the Terminal profile is active
+    /// (keystrokes, newline-stripped — never paste into a shell prompt).
+    pub terminal_injector: Option<Box<dyn Injector>>,
 }
 
 pub struct Callbacks {
     pub on_status: Box<dyn Fn(Status) + Send>,
     pub on_timing: Option<Box<dyn Fn(DictationTiming) + Send>>,
+    /// Assistant-command answer to show in a popover (design doc §10).
+    pub on_assistant: Option<Box<dyn Fn(String) + Send>>,
+    /// A short HUD flash after a command transform ("Rewrote 42 words").
+    pub on_flash: Option<Box<dyn Fn(String) + Send>>,
 }
 
 /// Owns the dictation pipeline. Construct with `new`, then call `run` on a
@@ -80,12 +90,21 @@ pub struct Orchestrator {
     state: State,
     /// Context captured at key-down (design doc §7: parallel to speaking).
     session_context: Option<SessionContext>,
+    /// Last text injected, used as the operand for commands when nothing is
+    /// selected ("...and we'll ship Friday" then "make that professional").
+    last_injection: Option<String>,
 }
 
 struct SessionContext {
     app: openflow_context::AppInfo,
     profile: openflow_context::AppProfile,
     text: openflow_context::TextContext,
+}
+
+/// LLM backend + the registered command set, for voice-command handling.
+pub struct CommandRuntime {
+    pub backend: Box<dyn openflow_llm::LlmBackend>,
+    pub commands: Vec<openflow_llm::Command>,
 }
 
 /// Cloneable sender for posting events from any thread.
@@ -115,6 +134,7 @@ impl Orchestrator {
                 rx,
                 state: State::Idle,
                 session_context: None,
+                last_injection: None,
             },
             OrchestratorHandle { tx },
         )
@@ -266,13 +286,46 @@ impl Orchestrator {
                     timing.stt_ms = stt_started.elapsed().as_millis() as u64;
                     let raw = t.text.trim().to_string();
 
-                    // 1. Dictionary fuzzy-replace. 2. Snippet short-circuit.
-                    // 3. LLM cleanup with guard + fallback.
+                    // Voice command? (design doc §10). Operand = selection, or
+                    // the last dictation. Runs before the dictation path.
+                    if self.try_run_command(&raw, session_context.as_ref()) {
+                        (self.callbacks.on_status)(Status::Idle);
+                        return;
+                    }
+
+                    let profile = session_context.as_ref().map(|c| c.profile);
+                    let coding_mode = matches!(
+                        profile,
+                        Some(
+                            openflow_context::AppProfile::Coding
+                                | openflow_context::AppProfile::Terminal
+                        )
+                    );
+                    let terminal_mode =
+                        matches!(profile, Some(openflow_context::AppProfile::Terminal));
+
+                    // 1. Dictionary fuzzy-replace. 2. Coding grammar / casing
+                    // commands. 3. Snippet short-circuit. 4. LLM cleanup with
+                    // guard + fallback (skipped in terminals: literal only).
                     let after_dict = openflow_postproc::apply_dictionary(&raw, &dict_terms);
+                    let mut identifier_result = false;
+                    let after_dict = if coding_mode {
+                        if let Some(ident) = openflow_postproc::apply_casing_command(&after_dict) {
+                            identifier_result = true;
+                            ident
+                        } else {
+                            openflow_postproc::apply_coding_grammar(&after_dict)
+                        }
+                    } else {
+                        after_dict
+                    };
                     let final_text = if let Some(expansion) =
                         openflow_postproc::match_snippet(&after_dict, &snippet_defs)
                     {
                         expansion.to_string()
+                    } else if identifier_result || terminal_mode {
+                        // Identifiers and terminal input stay literal.
+                        after_dict.clone()
                     } else if let Some(cleanup) = self.services.cleanup.as_ref() {
                         let ctx = openflow_llm::CleanupContext {
                             tone: session_context.as_ref().and_then(|c| {
@@ -308,12 +361,26 @@ impl Orchestrator {
                         }
                     }
 
-                    // Trailing space so consecutive dictations chain naturally.
-                    let text = format!("{} ", final_text.trim_end());
+                    // Trailing space so consecutive dictations chain naturally
+                    // (but not after identifiers — code continues immediately).
+                    let text = if identifier_result {
+                        final_text.trim_end().to_string()
+                    } else {
+                        format!("{} ", final_text.trim_end())
+                    };
                     timing.chars = text.chars().count();
                     let inject_started = Instant::now();
-                    match self.services.injector.inject(&text) {
+                    let injector: &mut dyn Injector = if terminal_mode {
+                        match self.services.terminal_injector.as_deref_mut() {
+                            Some(t) => t,
+                            None => self.services.injector.as_mut(),
+                        }
+                    } else {
+                        self.services.injector.as_mut()
+                    };
+                    match injector.inject(&text) {
                         Ok(()) => {
+                            self.last_injection = Some(text.trim().to_string());
                             timing.inject_ms = inject_started.elapsed().as_millis() as u64;
                             timing.total_ms = started.elapsed().as_millis() as u64;
                             tracing::info!(
@@ -348,6 +415,65 @@ impl Orchestrator {
             }
         }
         (self.callbacks.on_status)(Status::Idle);
+    }
+
+    /// Try to interpret the utterance as a voice command (design doc §10).
+    /// Returns true if it was a command (handled), false to fall through to
+    /// normal dictation.
+    fn try_run_command(&mut self, raw: &str, ctx: Option<&SessionContext>) -> bool {
+        let Some(runtime) = self.services.commands.as_ref() else {
+            return false;
+        };
+        let selection = ctx.and_then(|c| c.text.selection.clone());
+        let operand = selection.clone().or_else(|| self.last_injection.clone());
+        let has_operand = operand.is_some();
+
+        let Some(m) = openflow_llm::match_command(raw, &runtime.commands, has_operand) else {
+            return false;
+        };
+
+        // Assistant commands use the spoken arg as the question; transforms use
+        // the operand text.
+        let input = if m.command.output == openflow_llm::OutputMode::Popover {
+            m.arg
+                .clone()
+                .unwrap_or_else(|| operand.clone().unwrap_or_default())
+        } else {
+            operand.clone().unwrap_or_default()
+        };
+
+        let output =
+            match openflow_llm::run_command(runtime.backend.as_ref(), &m, &input, &self.config.llm)
+            {
+                Ok(o) => o,
+                Err(e) => {
+                    tracing::warn!(error = %e, command = m.command.name, "command failed");
+                    if let Some(flash) = self.callbacks.on_flash.as_ref() {
+                        flash("Command failed — is Ollama running?".into());
+                    }
+                    return true; // still a command; don't fall through to dictation
+                }
+            };
+
+        match m.command.output {
+            openflow_llm::OutputMode::Popover => {
+                if let Some(on_assistant) = self.callbacks.on_assistant.as_ref() {
+                    on_assistant(output);
+                }
+            }
+            openflow_llm::OutputMode::Replace | openflow_llm::OutputMode::Insert => {
+                // Replace: overwrite the selection by pasting over it (the
+                // selection is still active in the target app).
+                if self.services.injector.inject(&output).is_ok() {
+                    self.last_injection = Some(output.clone());
+                    if let Some(flash) = self.callbacks.on_flash.as_ref() {
+                        let n = input.split_whitespace().count();
+                        flash(format!("{} · {n} words", m.command.name));
+                    }
+                }
+            }
+        }
+        true
     }
 
     fn personalization(
@@ -452,11 +578,15 @@ mod tests {
                 cleanup,
                 store,
                 context: None,
+                terminal_injector: None,
+                commands: None,
             },
             config,
             Callbacks {
                 on_status: Box::new(move |s| statuses2.lock().unwrap().push(s)),
                 on_timing: Some(Box::new(move |t| timings2.lock().unwrap().push(t))),
+                on_assistant: None,
+                on_flash: None,
             },
         );
         let thread = std::thread::spawn(move || orch.run());
@@ -588,6 +718,130 @@ mod tests {
     }
 
     #[test]
+    fn voice_command_transforms_selection_and_skips_dictation() {
+        // Selection present + "make it shorter" → command runs, its output
+        // replaces the selection; the raw utterance is NOT dictated.
+        let command_llm = openflow_llm::FakeLlm::with_responses(["Ship Monday."]);
+        let context = openflow_context::FakeContext {
+            app: Some(openflow_context::AppInfo {
+                process: "notepad.exe".into(),
+                title: "Untitled".into(),
+            }),
+            text: openflow_context::TextContext {
+                preceding_text: None,
+                selection: Some("We should probably ship it on Monday I think".into()),
+            },
+        };
+        let injector = FakeInjector::default();
+        let assistant_calls = Arc::new(Mutex::new(Vec::<String>::new()));
+
+        let mut config = Config::default();
+        config.audio.preroll_ms = 0;
+        let audio = AudioEngine::new(Box::new(FakeAudioSource::new(one_second_of_noise())));
+        let (orch, handle) = Orchestrator::new(
+            Services {
+                audio,
+                stt: Box::new(FakeStt::with_responses(["make it shorter"])),
+                vad: None,
+                injector: Box::new(injector.clone()),
+                partials: None,
+                stt_factory: None,
+                audio_factory: None,
+                cleanup: None,
+                store: None,
+                context: Some(Box::new(context)),
+                terminal_injector: None,
+                commands: Some(CommandRuntime {
+                    backend: Box::new(command_llm.clone()),
+                    commands: openflow_llm::builtin_commands(),
+                }),
+            },
+            config,
+            Callbacks {
+                on_status: Box::new(|_| {}),
+                on_timing: None,
+                on_assistant: None,
+                on_flash: None,
+            },
+        );
+        let thread = std::thread::spawn(move || orch.run());
+        handle.post(SessionEvent::HotkeyPressed);
+        std::thread::sleep(Duration::from_millis(400));
+        handle.post(SessionEvent::HotkeyReleased);
+        handle.post(SessionEvent::Shutdown);
+        thread.join().unwrap();
+
+        let _ = assistant_calls;
+        // The command's output replaced the selection (no trailing space added
+        // by dictation path — command injects verbatim).
+        assert_eq!(
+            injector.injected.lock().unwrap().clone(),
+            vec!["Ship Monday.".to_string()]
+        );
+        // The LLM saw the selection, not the trigger phrase.
+        let calls = command_llm.calls.lock().unwrap();
+        assert!(calls[0].1[0].content.contains("ship it on Monday"));
+    }
+
+    #[test]
+    fn coding_profile_applies_casing_and_terminal_skips_llm() {
+        // Terminal context: casing command → identifier, no LLM, terminal
+        // injector used, no trailing space.
+        let fake_llm = openflow_llm::FakeLlm::with_responses(["LLM MUST NOT RUN"]);
+        let cleanup = openflow_llm::CleanupService::new(Box::new(fake_llm.clone()));
+        let terminal_injector = FakeInjector::default();
+        let context = openflow_context::FakeContext {
+            app: Some(openflow_context::AppInfo {
+                process: "windowsterminal.exe".into(),
+                title: "pwsh".into(),
+            }),
+            text: openflow_context::TextContext::default(),
+        };
+
+        let mut config = Config::default();
+        config.audio.preroll_ms = 0;
+        let audio = AudioEngine::new(Box::new(FakeAudioSource::new(one_second_of_noise())));
+        let (orch, handle) = Orchestrator::new(
+            Services {
+                audio,
+                stt: Box::new(FakeStt::with_responses(["get user by id camel case"])),
+                vad: None,
+                injector: Box::new(FakeInjector::default()),
+                partials: None,
+                stt_factory: None,
+                audio_factory: None,
+                cleanup: Some(cleanup),
+                store: None,
+                context: Some(Box::new(context)),
+                terminal_injector: Some(Box::new(terminal_injector.clone())),
+                commands: None,
+            },
+            config,
+            Callbacks {
+                on_status: Box::new(|_| {}),
+                on_timing: None,
+                on_assistant: None,
+                on_flash: None,
+            },
+        );
+        let thread = std::thread::spawn(move || orch.run());
+        handle.post(SessionEvent::HotkeyPressed);
+        std::thread::sleep(Duration::from_millis(400));
+        handle.post(SessionEvent::HotkeyReleased);
+        handle.post(SessionEvent::Shutdown);
+        thread.join().unwrap();
+
+        assert!(
+            fake_llm.calls.lock().unwrap().is_empty(),
+            "LLM ran in terminal mode"
+        );
+        assert_eq!(
+            terminal_injector.injected.lock().unwrap().clone(),
+            vec!["getUserById".to_string()]
+        );
+    }
+
+    #[test]
     fn app_profile_tone_reaches_the_cleanup_prompt() {
         // Slack context → cleanup system prompt must carry the casual tone.
         let fake_llm = openflow_llm::FakeLlm::with_responses(["hey, ship it monday"]);
@@ -617,11 +871,15 @@ mod tests {
                 cleanup: Some(cleanup),
                 store: None,
                 context: Some(Box::new(context)),
+                terminal_injector: None,
+                commands: None,
             },
             config,
             Callbacks {
                 on_status: Box::new(|_| {}),
                 on_timing: None,
+                on_assistant: None,
+                on_flash: None,
             },
         );
         let thread = std::thread::spawn(move || orch.run());

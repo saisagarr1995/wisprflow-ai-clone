@@ -56,7 +56,7 @@ pub fn classify(info: &AppInfo) -> AppProfile {
     let stem = stem.trim_end_matches(".exe");
     let title = info.title.to_ascii_lowercase();
 
-    let matches = |names: &[&str]| names.iter().any(|n| stem == *n);
+    let matches = |names: &[&str]| names.contains(&stem);
 
     if matches(CHAT_APPS) {
         return AppProfile::Chat;

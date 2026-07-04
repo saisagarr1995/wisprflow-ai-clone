@@ -7,7 +7,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
 use openflow_settings::{Config, SettingsHandle};
-use openflow_store::{DictEntry, HistoryEntry, Snippet, Store};
+use openflow_store::{CustomCommand, DictEntry, HistoryEntry, Snippet, Store};
 
 /// Shared state managed by Tauri. `level_slot` is filled by the pipeline
 /// bootstrap (and refreshed when the audio engine is rebuilt).
@@ -191,6 +191,30 @@ pub fn history_delete(state: State<AppState>, id: i64) -> Result<(), String> {
 #[tauri::command]
 pub fn history_clear(state: State<AppState>) -> Result<(), String> {
     state.store.history_clear().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn commands_list(state: State<AppState>) -> Result<Vec<CustomCommand>, String> {
+    state.store.commands_list().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn commands_add(
+    state: State<AppState>,
+    name: String,
+    triggers: String,
+    prompt: String,
+    output_mode: String,
+) -> Result<(), String> {
+    state
+        .store
+        .commands_add(&name, &triggers, &prompt, &output_mode)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn commands_delete(state: State<AppState>, id: i64) -> Result<(), String> {
+    state.store.commands_delete(id).map_err(|e| e.to_string())
 }
 
 #[derive(Serialize)]

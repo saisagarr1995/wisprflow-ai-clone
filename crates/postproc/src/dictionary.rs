@@ -182,8 +182,10 @@ mod tests {
         let text = "this is a perfectly ordinary sentence with a dozen or so words in it today";
         let started = std::time::Instant::now();
         let _ = apply(text, &terms);
+        // Generous bound for debug builds; release is ~10x faster. The point
+        // is to catch accidental O(n²) blowups, not to benchmark precisely.
         assert!(
-            started.elapsed().as_millis() < 50,
+            started.elapsed().as_millis() < 250,
             "500-term dictionary took {:?}",
             started.elapsed()
         );
