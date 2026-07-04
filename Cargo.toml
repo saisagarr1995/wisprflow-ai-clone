@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = ["crates/*", "apps/desktop/src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/openflow/openflow"
+rust-version = "1.85"
+
+[workspace.dependencies]
+# Kept centralized so crates stay in lockstep. Add entries here as crates grow.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros", "time"] }
+notify = "8"
+dirs = "6"
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+strip = true
