@@ -7,9 +7,9 @@ An open-source, **fully local** Wispr Flow alternative: push-to-talk dictation i
 ## Building
 
 ```sh
-# Prereqs: Rust stable (1.85+), Node 22+, and on first run: npm install in apps/desktop/ui
-cd apps/desktop/ui && npm install
-npm run tauri dev     # run the desktop app (from apps/desktop/ui)
+# Prereqs: Rust stable (1.85+) with MSVC Build Tools on Windows, Node 22+
+cd apps/desktop && npm install
+npm run tauri dev       # run the desktop app (from apps/desktop)
 cargo test --workspace  # run all Rust tests (from repo root)
 ```
 

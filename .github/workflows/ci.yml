@@ -30,7 +30,7 @@ jobs:
         run: |
           npm ci
           npm run build
-        working-directory: apps/desktop/ui
+        working-directory: apps/desktop
       - uses: Swatinem/rust-cache@v2
       - name: Format
         run: cargo fmt --all --check

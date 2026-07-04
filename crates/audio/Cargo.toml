@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "openflow-audio"
 version.workspace = true
 edition.workspace = true
@@ -6,3 +6,13 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+cpal = "0.16"
+rubato = "0.16"
+rtrb = "0.3"
+hound = "3.5"
+ort = "2.0.0-rc.10"
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

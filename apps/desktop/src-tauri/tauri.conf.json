@@ -4,10 +4,10 @@
   "version": "0.1.0",
   "identifier": "dev.openflow.desktop",
   "build": {
-    "beforeDevCommand": "npm run dev --prefix ../ui",
+    "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "npm run build --prefix ../ui",
-    "frontendDist": "../ui/dist"
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
   },
   "app": {
     "windows": [

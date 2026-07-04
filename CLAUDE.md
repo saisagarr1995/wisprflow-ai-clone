@@ -15,8 +15,8 @@ Fully local push-to-talk dictation app: Tauri 2 (Rust core + React/TS UI), STT v
 
 ## Commands
 - Build/test Rust: `cargo build --workspace`, `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`
-- UI: `npm run dev` / `npm run build` in `apps/desktop/ui`; run app: `npm run tauri dev` (same dir)
-- The desktop crate's `generate_context!` needs `apps/desktop/ui/dist` to exist — run `npm run build` in the UI once before the first cargo build.
+- UI (frontend lives at `apps/desktop`, standard Tauri layout with `src-tauri/` inside): `npm run dev` / `npm run build`; run app: `npm run tauri dev` (all from `apps/desktop`)
+- The desktop crate's `generate_context!` needs `apps/desktop/dist` to exist — run `npm run build` in `apps/desktop` once before the first cargo build.
 
 ## Definition of done (every prompt)
 `cargo test --workspace` green, clippy clean with `-D warnings`, acceptance criteria of the prompt verified (manually where hardware is involved).
