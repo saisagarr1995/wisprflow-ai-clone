@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "openflow-stt"
 version.workspace = true
 edition.workspace = true
@@ -6,3 +6,9 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+whisper-rs = "0.16"
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+hound = "3.5"
