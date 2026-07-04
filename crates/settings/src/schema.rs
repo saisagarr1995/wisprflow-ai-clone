@@ -42,7 +42,10 @@ pub struct HotkeyConfig {
 
 impl Default for HotkeyConfig {
     fn default() -> Self {
-        Self { chord: "RCtrl".into(), mode: HotkeyMode::Hold }
+        Self {
+            chord: "RCtrl".into(),
+            mode: HotkeyMode::Hold,
+        }
     }
 }
 
@@ -68,7 +71,10 @@ pub struct AudioConfig {
 
 impl Default for AudioConfig {
     fn default() -> Self {
-        Self { input_device: None, preroll_ms: 250 }
+        Self {
+            input_device: None,
+            preroll_ms: 250,
+        }
     }
 }
 
@@ -84,7 +90,10 @@ impl Default for SttConfig {
     fn default() -> Self {
         // Small default so first-run download is quick; the onboarding wizard
         // upgrades this once the user picks a real model.
-        Self { engine: SttEngineKind::Auto, model_id: "whisper-tiny".into() }
+        Self {
+            engine: SttEngineKind::Auto,
+            model_id: "whisper-tiny".into(),
+        }
     }
 }
 
@@ -136,7 +145,10 @@ pub struct InjectionConfig {
 
 impl Default for InjectionConfig {
     fn default() -> Self {
-        Self { strategy: InjectionStrategy::Auto, clipboard_restore_delay_ms: 100 }
+        Self {
+            strategy: InjectionStrategy::Auto,
+            clipboard_restore_delay_ms: 100,
+        }
     }
 }
 

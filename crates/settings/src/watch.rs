@@ -26,13 +26,24 @@ impl SettingsHandle {
         let config = load_or_init(&path)?;
         let (tx, rx) = watch::channel(config);
         let watcher = Self::start_watcher(&path, tx.clone());
-        Ok((Self { path, tx, write_lock: Mutex::new(()), _watcher: watcher }, rx))
+        Ok((
+            Self {
+                path,
+                tx,
+                write_lock: Mutex::new(()),
+                _watcher: watcher,
+            },
+            rx,
+        ))
     }
 
     /// Read-modify-write: applies `mutate` to the current config, persists
     /// atomically, and broadcasts if anything actually changed.
     pub fn update(&self, mutate: impl FnOnce(&mut Config)) -> Result<(), SettingsError> {
-        let _guard = self.write_lock.lock().expect("settings write lock poisoned");
+        let _guard = self
+            .write_lock
+            .lock()
+            .expect("settings write lock poisoned");
         let mut config = self.tx.borrow().clone();
         mutate(&mut config);
         save_atomic(&self.path, &config)?;
@@ -55,11 +66,13 @@ impl SettingsHandle {
         let file_name = path.file_name()?.to_os_string();
         let path = path.to_path_buf();
 
-        let mut watcher = notify::recommended_watcher(
-            move |res: Result<notify::Event, notify::Error>| {
+        let mut watcher =
+            notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
                 let Ok(event) = res else { return };
-                let touches_config =
-                    event.paths.iter().any(|p| p.file_name() == Some(file_name.as_os_str()));
+                let touches_config = event
+                    .paths
+                    .iter()
+                    .any(|p| p.file_name() == Some(file_name.as_os_str()));
                 if !touches_config {
                     return;
                 }
@@ -70,10 +83,9 @@ impl SettingsHandle {
                     Ok(config) => broadcast_if_changed(&tx, config),
                     Err(err) => tracing::warn!(%err, "config hot-reload failed"),
                 }
-            },
-        )
-        .map_err(|err| tracing::warn!(%err, "config watcher unavailable"))
-        .ok()?;
+            })
+            .map_err(|err| tracing::warn!(%err, "config watcher unavailable"))
+            .ok()?;
 
         watcher
             .watch(&dir, RecursiveMode::NonRecursive)

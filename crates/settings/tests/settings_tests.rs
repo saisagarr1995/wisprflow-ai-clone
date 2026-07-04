@@ -45,7 +45,10 @@ fn corrupt_file_is_backed_up_and_replaced_with_defaults() {
     assert_eq!(config, Config::default());
 
     let backup = path.with_extension("json.bak");
-    assert!(backup.exists(), "corrupt config must be preserved as a backup");
+    assert!(
+        backup.exists(),
+        "corrupt config must be preserved as a backup"
+    );
     assert_eq!(fs::read_to_string(backup).unwrap(), "{ this is not json");
 
     // The file itself is now valid.
@@ -79,8 +82,7 @@ fn v0_config_migrates_and_is_rewritten() {
     assert_eq!(config.hotkey.chord, "F9");
 
     // Migration persists the upgraded file.
-    let raw: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    let raw: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(raw["version"], serde_json::json!(CONFIG_VERSION));
     assert!(raw.get("some_removed_field").is_none());
 }
@@ -95,7 +97,11 @@ fn atomic_save_leaves_no_temp_file() {
         .unwrap()
         .map(|e| e.unwrap().file_name().into_string().unwrap())
         .collect();
-    assert_eq!(names, vec!["config.json"], "no temp or stray files: {names:?}");
+    assert_eq!(
+        names,
+        vec!["config.json"],
+        "no temp or stray files: {names:?}"
+    );
 }
 
 #[test]

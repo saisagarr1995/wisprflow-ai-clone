@@ -17,7 +17,9 @@ pub enum SettingsError {
 /// `%APPDATA%/openflow` (Windows), `~/Library/Application Support/openflow`
 /// (macOS), `~/.config/openflow` (Linux).
 pub fn default_config_dir() -> PathBuf {
-    dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join("openflow")
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("openflow")
 }
 
 pub fn config_path() -> PathBuf {
