@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "openflow-store"
 version.workspace = true
 edition.workspace = true
@@ -6,3 +6,10 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

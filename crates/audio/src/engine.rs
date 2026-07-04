@@ -48,9 +48,23 @@ impl AudioEngine {
     }
 
     /// Mark session start at now minus pre-roll (clamped to retained audio).
-    pub fn begin_session(&mut self, preroll_ms: u32) {
+    /// Returns the absolute start index (used by streaming partials).
+    pub fn begin_session(&mut self, preroll_ms: u32) -> u64 {
         let head = self.history.lock().expect("history lock").head();
-        self.session_start = Some(head.saturating_sub(samples_for_ms(preroll_ms) as u64));
+        let start = head.saturating_sub(samples_for_ms(preroll_ms) as u64);
+        self.session_start = Some(start);
+        start
+    }
+
+    /// Shared handle to the rolling history, for read-only consumers
+    /// (streaming partial transcription).
+    pub fn history_handle(&self) -> Arc<Mutex<RollingBuffer>> {
+        self.history.clone()
+    }
+
+    /// Shared handle to the level meter (RMS bits), for the UI.
+    pub fn level_handle(&self) -> Arc<AtomicU32> {
+        self.level_bits.clone()
     }
 
     /// Snapshot everything from the session marker to now. Returns `None` if

@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "openflow-postproc"
 version.workspace = true
 edition.workspace = true
@@ -6,3 +6,6 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+strsim = "0.11"
+thiserror = { workspace = true }
+tracing = { workspace = true }

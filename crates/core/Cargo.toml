@@ -7,8 +7,12 @@ rust-version.workspace = true
 
 [dependencies]
 openflow-audio = { path = "../audio" }
+openflow-context = { path = "../context" }
 openflow-inject = { path = "../inject" }
+openflow-llm = { path = "../llm" }
+openflow-postproc = { path = "../postproc" }
 openflow-settings = { path = "../settings" }
+openflow-store = { path = "../store" }
 openflow-stt = { path = "../stt" }
 thiserror = { workspace = true }
 tracing = { workspace = true }

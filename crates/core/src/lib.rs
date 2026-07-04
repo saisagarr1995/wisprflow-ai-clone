@@ -8,5 +8,10 @@
 //! impossible (design doc §5).
 
 mod orchestrator;
+mod partial;
 
-pub use orchestrator::{Orchestrator, OrchestratorHandle, SessionEvent, Status};
+pub use orchestrator::{
+    AudioFactory, Callbacks, DictationTiming, Orchestrator, OrchestratorHandle, Services,
+    SessionEvent, Status, SttFactory,
+};
+pub use partial::PartialWorker;

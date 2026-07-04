@@ -19,11 +19,15 @@ tauri = { version = "2", features = ["tray-icon"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 openflow-audio = { path = "../../../crates/audio" }
+openflow-context = { path = "../../../crates/context" }
 openflow-core = { path = "../../../crates/core" }
 openflow-hotkey = { path = "../../../crates/hotkey" }
 openflow-inject = { path = "../../../crates/inject" }
+openflow-llm = { path = "../../../crates/llm" }
 openflow-models = { path = "../../../crates/models" }
+openflow-store = { path = "../../../crates/store" }
 openflow-settings = { path = "../../../crates/settings" }
 openflow-stt = { path = "../../../crates/stt" }
+tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
