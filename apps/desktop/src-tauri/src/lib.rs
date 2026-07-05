@@ -15,13 +15,44 @@ use tauri::{
 use commands::AppState;
 use openflow_core::{Callbacks, Orchestrator, Services, SessionEvent, Status};
 
-pub fn run() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,ort=warn".into()),
-        )
+/// Set up logging to a daily rolling file in `<data_dir>/openflow/logs` plus
+/// stdout. Returns the non-blocking writer guard, which must be kept alive for
+/// the process lifetime (dropping it flushes and stops the writer thread).
+fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "info,ort=warn".into());
+    let stdout_layer = tracing_subscriber::fmt::layer();
+
+    let log_dir = openflow_store::default_db_path()
+        .parent()
+        .map(|d| d.join("logs"));
+    let (file_layer, guard) = match log_dir {
+        Some(dir) => {
+            let _ = std::fs::create_dir_all(&dir);
+            let appender = tracing_appender::rolling::daily(&dir, "openflow.log");
+            let (nb, guard) = tracing_appender::non_blocking(appender);
+            let layer = tracing_subscriber::fmt::layer().with_ansi(false).with_writer(nb);
+            (Some(layer), Some(guard))
+        }
+        None => (None, None),
+    };
+
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(stdout_layer)
+        .with(file_layer)
         .init();
+    guard
+}
+
+pub fn run() {
+    // Log to a rolling file under the data dir *and* stdout. The file matters
+    // for standalone launches (GUI subsystem = no console) and for user support
+    // ("copy debug bundle"); stdout is for `tauri dev`.
+    let _log_guard = init_logging();
 
     let (settings, config_rx) =
         openflow_settings::SettingsHandle::init(openflow_settings::config_path())
