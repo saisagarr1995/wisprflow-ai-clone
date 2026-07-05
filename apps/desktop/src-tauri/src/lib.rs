@@ -138,6 +138,23 @@ pub fn run() {
             position_hud_bottom_center(&hud);
             let _ = hud.show();
 
+            // The main window starts hidden (tray app). Show it once on first
+            // run so a new user discovers the app; afterwards it lives quietly
+            // in the tray and is opened from the tray menu.
+            let marker = openflow_store::default_db_path()
+                .parent()
+                .map(|d| d.join(".shown"));
+            let first_run = marker.as_ref().map(|m| !m.exists()).unwrap_or(false);
+            if first_run {
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.show();
+                    let _ = win.set_focus();
+                }
+                if let Some(m) = &marker {
+                    let _ = std::fs::write(m, "1");
+                }
+            }
+
             let handle = app.handle().clone();
             std::thread::Builder::new()
                 .name("openflow-bootstrap".into())
