@@ -130,6 +130,11 @@ pub fn run() {
                     .visible(false)
                     .build()?;
             let _ = hud.set_ignore_cursor_events(true);
+            // Critical: the HUD must never take foreground focus. If it did, the
+            // orchestrator would see the focused app change to OpenFlow and
+            // abort injection (design doc §7). WS_EX_NOACTIVATE keeps it from
+            // ever becoming the active window, even when shown.
+            make_non_activating(&hud);
             position_hud_bottom_center(&hud);
             let _ = hud.show();
 
@@ -403,16 +408,41 @@ fn tooltip_for(s: Status) -> &'static str {
     }
 }
 
+/// Apply `WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW` so the window can never steal
+/// foreground focus (and stays out of Alt-Tab). Used for the HUD overlay.
+#[cfg(windows)]
+fn make_non_activating(win: &tauri::WebviewWindow) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    };
+    if let Ok(raw) = win.hwnd() {
+        let hwnd = HWND(raw.0);
+        unsafe {
+            let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            SetWindowLongPtrW(
+                hwnd,
+                GWL_EXSTYLE,
+                ex | WS_EX_NOACTIVATE.0 as isize | WS_EX_TOOLWINDOW.0 as isize,
+            );
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn make_non_activating(_win: &tauri::WebviewWindow) {}
+
 fn update_hud(app: &AppHandle, status: Status) {
     // The HUD stays visible always (idle handle → pill); the React side reacts
-    // to the "status" event. We only re-assert position on activity in case
-    // the display configuration changed.
+    // to the "status" event. Crucially we do NOT call show()/set_focus() here:
+    // re-showing during recording would risk stealing foreground focus and
+    // aborting injection. We only re-assert position (SetWindowPos does not
+    // activate) in case the display configuration changed.
     if matches!(status, Status::Recording) {
         let app2 = app.clone();
         let _ = app.run_on_main_thread(move || {
             if let Some(hud) = app2.get_webview_window("hud") {
                 position_hud_bottom_center(&hud);
-                let _ = hud.show();
             }
         });
     }
