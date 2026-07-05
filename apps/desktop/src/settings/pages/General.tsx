@@ -1,5 +1,5 @@
 import { Config } from "../../lib/ipc";
-import { Row, Section, selectCls, inputCls } from "../ui";
+import { PageHeader, Row, Section, selectCls, inputCls } from "../ui";
 
 const HOTKEY_PRESETS = ["RCtrl", "RAlt", "F9", "Ctrl+Shift+Space", "Ctrl+Shift+D"];
 const LANGUAGES: Array<[string, string]> = [
@@ -21,8 +21,11 @@ export default function General({
   update: (mutate: (c: Config) => void) => void;
 }) {
   return (
-    <div className="max-w-2xl">
-      <h1 className="mb-6 text-xl font-semibold">General</h1>
+    <div>
+      <PageHeader
+        title="General"
+        subtitle="Your dictation hotkey, language, and how text is inserted."
+      />
 
       <Section title="Dictation hotkey">
         <Row label="Hotkey" hint="Preset chords; or type a custom one like Alt+Z">

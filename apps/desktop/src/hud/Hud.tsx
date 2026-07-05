@@ -1,81 +1,103 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import "./hud.css";
 
-const BAR_COUNT = 36;
+type HudState = "idle" | "recording" | "processing" | "flash";
+
+const BAR_COUNT = 14;
+const IDLE_BARS = Array(BAR_COUNT).fill(0.12);
 
 /**
- * The floating dictation capsule: a cream pill with a live waveform, a state
- * pill above it, and the streaming partial transcript below. The window is
- * transparent, click-through, and never focused.
+ * The Wispr Flow-style floating pill. Minimal and compact:
+ *  - idle: a tiny handle bar at the very bottom of the screen
+ *  - recording: a small dark capsule with a live waveform; a text pill with the
+ *    streaming partial floats above it once words arrive
+ *  - processing: the waveform gently pulses while the final pass + LLM run
+ *  - flash: a brief confirmation pill after a voice command
+ * The window is transparent and click-through; content is bottom-anchored.
  */
 export default function Hud() {
-  const [status, setStatus] = useState<"recording" | "processing" | "idle">("idle");
+  const [state, setState] = useState<HudState>("idle");
   const [partial, setPartial] = useState("");
-  const [flash, setFlash] = useState<string | null>(null);
-  const [bars, setBars] = useState<number[]>(() => Array(BAR_COUNT).fill(0.04));
-  const levelsRef = useRef<number[]>(Array(BAR_COUNT).fill(0.04));
+  const [flash, setFlash] = useState("");
+  const [bars, setBars] = useState<number[]>(IDLE_BARS);
+  const levelsRef = useRef<number[]>([...IDLE_BARS]);
+  const flashTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     const unsubs: Array<() => void> = [];
+
     listen<string>("status", (e) => {
-      setStatus(e.payload as "recording" | "processing" | "idle");
-      if (e.payload === "recording") {
+      const s = e.payload as "idle" | "recording" | "processing";
+      setState(s);
+      if (s === "recording") {
         setPartial("");
-        setFlash(null);
-        levelsRef.current = Array(BAR_COUNT).fill(0.04);
-        setBars([...levelsRef.current]);
+        setFlash("");
+        levelsRef.current = [...IDLE_BARS];
+        setBars([...IDLE_BARS]);
       }
     }).then((u) => unsubs.push(u));
+
     listen<number>("level", (e) => {
-      const next = [...levelsRef.current.slice(1), Math.min(1, e.payload * 6 + 0.04)];
+      // Map RMS → bar height with headroom; scroll the ring left.
+      const v = Math.min(1, Math.max(0.12, e.payload * 7));
+      const next = [...levelsRef.current.slice(1), v];
       levelsRef.current = next;
       setBars(next);
     }).then((u) => unsubs.push(u));
+
     listen<string>("partial", (e) => setPartial(e.payload)).then((u) => unsubs.push(u));
+
     listen<string>("flash", (e) => {
+      window.clearTimeout(flashTimer.current);
       setFlash(e.payload);
-      setTimeout(() => setFlash(null), 2200);
+      setState("flash");
+      flashTimer.current = window.setTimeout(() => {
+        setFlash("");
+        setState("idle");
+      }, 2000);
     }).then((u) => unsubs.push(u));
-    return () => unsubs.forEach((u) => u());
+
+    return () => {
+      unsubs.forEach((u) => u());
+      window.clearTimeout(flashTimer.current);
+    };
   }, []);
 
-  // A command flash (e.g. "shorten · 42 words") pre-empts the capsule.
-  if (flash) {
-    return (
-      <div className="flex h-screen w-screen items-end justify-center bg-transparent pb-6">
-        <div className="rounded-full bg-emerald-800 px-4 py-1.5 text-sm font-semibold text-emerald-50 shadow-lg">
-          ✓ {flash}
-        </div>
-      </div>
-    );
-  }
-
-  const statePill =
-    status === "recording"
-      ? { text: "● Listening", cls: "bg-emerald-800 text-emerald-50" }
-      : { text: "Thinking…", cls: "bg-amber-600 text-amber-50" };
-
   return (
-    <div className="flex h-screen w-screen select-none flex-col items-center justify-end gap-2 bg-transparent pb-2">
-      <div className={`rounded-full px-4 py-1 text-sm font-semibold shadow-lg ${statePill.cls}`}>
-        {statePill.text}
-      </div>
+    <div className="hud-root">
+      {state === "idle" && <div className="hud-handle" />}
 
-      <div className="flex h-16 items-center gap-[3px] rounded-full border-[3px] border-neutral-900 bg-[#f6f1e7] px-7 shadow-xl">
-        {bars.map((v, i) => (
-          <div
-            key={i}
-            className={`w-[3.5px] rounded-full bg-neutral-900 ${
-              status === "processing" ? "animate-pulse" : ""
-            }`}
-            style={{ height: `${Math.round(6 + v * 40)}px` }}
-          />
-        ))}
-      </div>
+      {state === "flash" && (
+        <div className="hud-flash">
+          <svg viewBox="0 0 20 20" className="hud-flash-check" aria-hidden>
+            <path
+              d="M5 10.5l3 3 7-7"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <span>{flash}</span>
+        </div>
+      )}
 
-      {partial && (
-        <div className="max-w-[400px] truncate rounded-full bg-neutral-900/85 px-4 py-1 text-sm text-neutral-100 shadow-lg">
-          {partial}
+      {(state === "recording" || state === "processing") && (
+        <div className="hud-stack">
+          {partial && (
+            <div className="hud-partial">
+              <span>{partial}</span>
+            </div>
+          )}
+          <div className={`hud-pill ${state === "processing" ? "is-processing" : ""}`}>
+            <div className="hud-wave">
+              {bars.map((v, i) => (
+                <span key={i} className="hud-bar" style={{ height: `${6 + v * 20}px` }} />
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -81,10 +81,12 @@ pub fn run() {
 
             // HUD overlay: transparent, click-through, never focusable — it
             // must not steal focus from the app the user is dictating into.
+            // Small and always visible (the idle handle sits at the bottom,
+            // Wispr Flow-style), expanding into a pill while recording.
             let hud =
                 WebviewWindowBuilder::new(app, "hud", WebviewUrl::App("index.html#hud".into()))
                     .title("OpenFlow HUD")
-                    .inner_size(420.0, 150.0)
+                    .inner_size(380.0, 120.0)
                     .transparent(true)
                     .decorations(false)
                     .shadow(false)
@@ -95,6 +97,8 @@ pub fn run() {
                     .visible(false)
                     .build()?;
             let _ = hud.set_ignore_cursor_events(true);
+            position_hud_bottom_center(&hud);
+            let _ = hud.show();
 
             let handle = app.handle().clone();
             std::thread::Builder::new()
@@ -367,21 +371,18 @@ fn tooltip_for(s: Status) -> &'static str {
 }
 
 fn update_hud(app: &AppHandle, status: Status) {
-    let app2 = app.clone();
-    let _ = app.run_on_main_thread(move || {
-        let Some(hud) = app2.get_webview_window("hud") else {
-            return;
-        };
-        match status {
-            Status::Recording | Status::Processing => {
+    // The HUD stays visible always (idle handle → pill); the React side reacts
+    // to the "status" event. We only re-assert position on activity in case
+    // the display configuration changed.
+    if matches!(status, Status::Recording) {
+        let app2 = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if let Some(hud) = app2.get_webview_window("hud") {
                 position_hud_bottom_center(&hud);
                 let _ = hud.show();
             }
-            Status::Idle => {
-                let _ = hud.hide();
-            }
-        }
-    });
+        });
+    }
 }
 
 fn position_hud_bottom_center(hud: &tauri::WebviewWindow) {
@@ -390,8 +391,11 @@ fn position_hud_bottom_center(hud: &tauri::WebviewWindow) {
     };
     let mpos = monitor.position();
     let msize = monitor.size();
+    let scale = monitor.scale_factor();
     let x = mpos.x + (msize.width as i32 - size.width as i32) / 2;
-    let y = mpos.y + msize.height as i32 - size.height as i32 - 96;
+    // Sit just above the taskbar / screen edge.
+    let gap = (12.0 * scale) as i32;
+    let y = mpos.y + msize.height as i32 - size.height as i32 - gap;
     let _ = hud.set_position(tauri::PhysicalPosition { x, y });
 }
 

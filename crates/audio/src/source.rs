@@ -35,12 +35,17 @@ pub fn list_input_devices() -> Vec<String> {
 }
 
 /// Real microphone capture. The cpal callback pushes raw interleaved samples
-/// into an SPSC ring; a drain thread downmixes + resamples and calls the sink.
+/// into an SPSC ring; a single worker thread owns the stream *and* drains the
+/// ring (downmix + resample → sink).
+///
+/// The stream is created, held, and dropped entirely on the worker thread and
+/// never stored in `CpalSource`. This matters because `cpal::Stream` is not
+/// `Send` on some backends (macOS CoreAudio), yet `AudioSource: Send` requires
+/// `CpalSource` to be — so `CpalSource` must not hold a stream directly.
 pub struct CpalSource {
     device_name: Option<String>,
-    stream: Option<cpal::Stream>,
     running: Arc<AtomicBool>,
-    drain: Option<std::thread::JoinHandle<()>>,
+    worker: Option<std::thread::JoinHandle<()>>,
 }
 
 impl CpalSource {
@@ -48,67 +53,86 @@ impl CpalSource {
     pub fn new(device_name: Option<String>) -> Self {
         Self {
             device_name,
-            stream: None,
             running: Arc::new(AtomicBool::new(false)),
-            drain: None,
+            worker: None,
         }
     }
+}
 
-    fn pick_device(&self) -> Result<cpal::Device, AudioError> {
-        let host = cpal::default_host();
-        match &self.device_name {
-            None => host.default_input_device().ok_or(AudioError::NoDevice),
-            Some(name) => host
-                .input_devices()
-                .map_err(|e| AudioError::Backend(e.to_string()))?
-                .find(|d| d.name().map(|n| &n == name).unwrap_or(false))
-                .ok_or_else(|| AudioError::DeviceNotFound(name.clone())),
-        }
+fn pick_device(device_name: &Option<String>) -> Result<cpal::Device, AudioError> {
+    let host = cpal::default_host();
+    match device_name {
+        None => host.default_input_device().ok_or(AudioError::NoDevice),
+        Some(name) => host
+            .input_devices()
+            .map_err(|e| AudioError::Backend(e.to_string()))?
+            .find(|d| d.name().map(|n| &n == name).unwrap_or(false))
+            .ok_or_else(|| AudioError::DeviceNotFound(name.clone())),
     }
 }
 
 impl AudioSource for CpalSource {
     fn start(&mut self, mut sink: AudioSink) -> Result<(), AudioError> {
-        let device = self.pick_device()?;
-        let config = device
-            .default_input_config()
-            .map_err(|e| AudioError::Backend(e.to_string()))?;
-        let sample_rate = config.sample_rate().0;
-        let channels = config.channels() as usize;
-        tracing::info!(
-            device = device.name().unwrap_or_default(),
-            sample_rate,
-            channels,
-            "opening input stream"
-        );
-
-        // 2 s of raw audio between the realtime callback and the drain thread.
-        let (mut producer, mut consumer) =
-            rtrb::RingBuffer::<f32>::new((sample_rate as usize * channels * 2).next_power_of_two());
-
-        let err_fn = |e| tracing::error!(error = %e, "input stream error");
-        let stream = device
-            .build_input_stream(
-                &config.into(),
-                move |data: &[f32], _| {
-                    // Realtime thread: copy only. If the drain thread stalls
-                    // and the ring fills, samples are dropped (never block).
-                    let n = producer.slots().min(data.len());
-                    for &s in &data[..n] {
-                        let _ = producer.push(s);
-                    }
-                },
-                err_fn,
-                None,
-            )
-            .map_err(|e| AudioError::Backend(e.to_string()))?;
-        stream
-            .play()
-            .map_err(|e| AudioError::Backend(e.to_string()))?;
-
         self.running.store(true, Ordering::Release);
         let running = self.running.clone();
-        self.drain = Some(std::thread::spawn(move || {
+        let device_name = self.device_name.clone();
+        // The worker reports whether the stream opened, so `start` can return
+        // the real error instead of a detached-thread panic.
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), AudioError>>();
+
+        self.worker = Some(std::thread::spawn(move || {
+            // Open the device + stream on this thread; keep the stream alive
+            // here (it must be dropped on the same thread that created it).
+            let opened = (|| {
+                let device = pick_device(&device_name)?;
+                let config = device
+                    .default_input_config()
+                    .map_err(|e| AudioError::Backend(e.to_string()))?;
+                let sample_rate = config.sample_rate().0;
+                let channels = config.channels() as usize;
+                tracing::info!(
+                    device = device.name().unwrap_or_default(),
+                    sample_rate,
+                    channels,
+                    "opening input stream"
+                );
+
+                // 2 s of raw audio between the realtime callback and the drain.
+                let (mut producer, consumer) = rtrb::RingBuffer::<f32>::new(
+                    (sample_rate as usize * channels * 2).next_power_of_two(),
+                );
+                let err_fn = |e| tracing::error!(error = %e, "input stream error");
+                let stream = device
+                    .build_input_stream(
+                        &config.into(),
+                        move |data: &[f32], _| {
+                            // Realtime thread: copy only, never block.
+                            let n = producer.slots().min(data.len());
+                            for &s in &data[..n] {
+                                let _ = producer.push(s);
+                            }
+                        },
+                        err_fn,
+                        None,
+                    )
+                    .map_err(|e| AudioError::Backend(e.to_string()))?;
+                stream
+                    .play()
+                    .map_err(|e| AudioError::Backend(e.to_string()))?;
+                Ok((stream, consumer, sample_rate, channels))
+            })();
+
+            let (_stream, mut consumer, sample_rate, channels) = match opened {
+                Ok(v) => {
+                    let _ = ready_tx.send(Ok(()));
+                    v
+                }
+                Err(e) => {
+                    let _ = ready_tx.send(Err(e));
+                    return;
+                }
+            };
+
             let mut resampler = Resampler::new(sample_rate, channels);
             let mut raw = Vec::with_capacity(4096);
             while running.load(Ordering::Acquire) {
@@ -128,15 +152,25 @@ impl AudioSource for CpalSource {
                     sink(&mono16k);
                 }
             }
+            // `_stream` drops here, on the thread that created it.
         }));
-        self.stream = Some(stream);
-        Ok(())
+
+        match ready_rx.recv() {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => {
+                self.stop();
+                Err(e)
+            }
+            Err(_) => {
+                self.stop();
+                Err(AudioError::Backend("audio worker thread exited".into()))
+            }
+        }
     }
 
     fn stop(&mut self) {
         self.running.store(false, Ordering::Release);
-        self.stream = None; // drops (and closes) the cpal stream
-        if let Some(handle) = self.drain.take() {
+        if let Some(handle) = self.worker.take() {
             let _ = handle.join();
         }
     }

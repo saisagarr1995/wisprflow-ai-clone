@@ -6,22 +6,17 @@ on:
   pull_request:
 
 jobs:
-  rust:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+  # Windows is the current target platform: the desktop app's hotkey,
+  # injection, and context backends are Win32. Full workspace build + test.
+  windows:
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Linux system deps (Tauri)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev
+      - name: Install LLVM (libclang for whisper.cpp bindgen)
+        run: choco install llvm -y
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -38,3 +33,33 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+
+  # macOS/Linux backends (hotkey/injection/context) are not implemented yet, so
+  # the desktop app is Windows-only. These jobs guard that the platform-agnostic
+  # library crates keep compiling and passing everywhere, ahead of those ports.
+  portable-crates:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      # Crates that must build/test on every platform (exclude apps/desktop and
+      # its Win32-only surface).
+      PORTABLE: >-
+        -p openflow-audio -p openflow-stt -p openflow-llm -p openflow-postproc
+        -p openflow-settings -p openflow-store -p openflow-models
+        -p openflow-context -p openflow-inject -p openflow-hotkey -p openflow-core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Linux system deps (libclang for bindgen, ALSA for cpal)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libclang-dev clang cmake libasound2-dev
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy (portable crates)
+        run: cargo clippy ${{ env.PORTABLE }} --all-targets -- -D warnings
+      - name: Test (portable crates)
+        run: cargo test ${{ env.PORTABLE }}

@@ -127,8 +127,11 @@ impl Default for LlmConfig {
         Self {
             enabled: true,
             base_url: "http://localhost:11434".into(),
-            cleanup_model: "qwen3:4b-instruct".into(),
-            rewrite_model: "gemma3:12b".into(),
+            // A single small model powers both the hot-path cleanup and
+            // rewrites out of the box, so first run needs one download.
+            // Users can point `rewrite_model` at a larger model for quality.
+            cleanup_model: "qwen3:4b".into(),
+            rewrite_model: "qwen3:4b".into(),
             coding_model: None,
         }
     }

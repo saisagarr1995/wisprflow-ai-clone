@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Config, getLevel, listDevices } from "../../lib/ipc";
-import { Row, Section, selectCls } from "../ui";
+import { PageHeader, Row, Section, selectCls } from "../ui";
 
 export default function Microphone({
   config,
@@ -21,8 +21,8 @@ export default function Microphone({
   const pct = Math.min(100, Math.round(level * 400));
 
   return (
-    <div className="max-w-2xl">
-      <h1 className="mb-6 text-xl font-semibold">Microphone</h1>
+    <div>
+      <PageHeader title="Microphone" subtitle="Pick your input and check the level before dictating." />
 
       <Section title="Input device">
         <Row label="Device" hint="Changing devices takes effect immediately">

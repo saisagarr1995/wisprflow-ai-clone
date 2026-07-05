@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Section, btnCls, inputCls } from "../ui";
+import { PageHeader, Section, btnCls, inputCls } from "../ui";
 
 interface Snippet {
   id: number;
@@ -27,12 +27,11 @@ export default function Snippets() {
   };
 
   return (
-    <div className="max-w-2xl">
-      <h1 className="mb-2 text-xl font-semibold">Snippets</h1>
-      <p className="mb-6 text-sm text-neutral-500">
-        Say the trigger phrase (optionally prefixed with &ldquo;insert&rdquo;), get the full text.
-        Say <span className="text-neutral-300">“my address”</span> → your address appears.
-      </p>
+    <div>
+      <PageHeader
+        title="Snippets"
+        subtitle="Say the trigger phrase (optionally prefixed with “insert”), get the full text. Say “my address” → your address appears."
+      />
 
       <div className="mb-6 flex flex-col gap-2">
         <input

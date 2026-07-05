@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Section, btnCls, inputCls, selectCls } from "../ui";
+import { PageHeader, Section, btnCls, inputCls, selectCls } from "../ui";
 
 interface CustomCommand {
   id: number;
@@ -45,12 +45,11 @@ export default function Commands() {
   };
 
   return (
-    <div className="max-w-2xl">
-      <h1 className="mb-2 text-xl font-semibold">Voice commands</h1>
-      <p className="mb-6 text-sm text-neutral-500">
-        Select text (or dictate first), then hold your hotkey and say a command. It runs through
-        your local model and replaces the selection.
-      </p>
+    <div>
+      <PageHeader
+        title="Voice commands"
+        subtitle="Select text (or dictate first), then hold your hotkey and say a command. It runs through your local model and replaces the selection."
+      />
 
       <Section title="Built-in commands">
         <div className="flex flex-wrap gap-2 px-4 py-3">

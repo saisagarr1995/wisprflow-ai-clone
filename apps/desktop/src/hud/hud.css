@@ -1,0 +1,130 @@
+/* Wispr Flow-style HUD. Everything is bottom-anchored inside a small,
+   transparent, click-through window. Kept in its own stylesheet so the tiny
+   dimensions and animations don't get lost among Tailwind utilities. */
+
+.hud-root {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding-bottom: 8px;
+  background: transparent;
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* Idle: a subtle handle bar, like a home indicator. */
+.hud-handle {
+  width: 46px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.32);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+}
+
+/* Recording/processing stack: text pill above the waveform pill. */
+.hud-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+}
+
+.hud-partial {
+  max-width: 340px;
+  padding: 7px 15px;
+  border-radius: 999px;
+  background: #0b0b0d;
+  color: #f4f4f5;
+  font-size: 13.5px;
+  font-weight: 550;
+  line-height: 1.25;
+  letter-spacing: 0.1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow:
+    0 6px 20px rgba(0, 0, 0, 0.45),
+    0 0 0 0.5px rgba(255, 255, 255, 0.06) inset;
+  animation: hud-rise 160ms ease-out;
+}
+
+.hud-pill {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  min-width: 92px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: #0b0b0d;
+  box-shadow:
+    0 6px 20px rgba(0, 0, 0, 0.5),
+    0 0 0 0.5px rgba(255, 255, 255, 0.08) inset;
+  animation: hud-rise 160ms ease-out;
+}
+
+.hud-pill.is-processing {
+  animation: hud-rise 160ms ease-out, hud-breathe 1.4s ease-in-out infinite 160ms;
+}
+
+.hud-wave {
+  display: flex;
+  align-items: center;
+  gap: 2.5px;
+  height: 26px;
+}
+
+.hud-bar {
+  width: 2.5px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffffff 0%, #b7b7bd 100%);
+  transition: height 90ms ease-out;
+}
+
+/* Command confirmation flash. */
+.hud-flash {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 16px;
+  border-radius: 999px;
+  background: #0f7a4f;
+  color: #eafff4;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  animation: hud-rise 160ms ease-out;
+}
+
+.hud-flash-check {
+  width: 16px;
+  height: 16px;
+  color: #eafff4;
+}
+
+@keyframes hud-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes hud-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.72;
+  }
+}

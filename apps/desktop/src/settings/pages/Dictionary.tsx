@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Section, btnCls, inputCls } from "../ui";
+import { PageHeader, Section, btnCls, inputCls } from "../ui";
 
 interface DictEntry {
   id: number;
@@ -28,13 +28,11 @@ export default function Dictionary() {
   };
 
   return (
-    <div className="max-w-2xl">
-      <h1 className="mb-2 text-xl font-semibold">Dictionary</h1>
-      <p className="mb-6 text-sm text-neutral-500">
-        Words the recognizer should always get right — names, jargon, commands. The optional
-        &ldquo;sounds like&rdquo; teaches it what the word sounds like when misheard (e.g.
-        kubectl → &ldquo;cube control&rdquo;).
-      </p>
+    <div>
+      <PageHeader
+        title="Dictionary"
+        subtitle="Words the recognizer should always get right — names, jargon, commands. The optional “sounds like” teaches it what the word sounds like when misheard (e.g. kubectl → “cube control”)."
+      />
 
       <div className="mb-6 flex gap-2">
         <input

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { PageHeader } from "../ui";
 
 interface Timing {
   audio_ms: number;
@@ -41,12 +42,11 @@ export default function Latency() {
   const maxTotal = Math.max(1, ...totals);
 
   return (
-    <div className="max-w-3xl">
-      <h1 className="mb-2 text-xl font-semibold">Latency</h1>
-      <p className="mb-6 text-sm text-neutral-500">
-        End-to-end time from releasing the hotkey to text appearing, for your last{" "}
-        {timings.length} dictations. Target: under 500 ms typical.
-      </p>
+    <div>
+      <PageHeader
+        title="Latency"
+        subtitle={`End-to-end time from releasing the hotkey to text appearing, for your last ${timings.length} dictations. Target: under 500 ms typical.`}
+      />
 
       <div className="mb-8 grid grid-cols-3 gap-4">
         {[

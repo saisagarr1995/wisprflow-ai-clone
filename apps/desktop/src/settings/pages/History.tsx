@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { inputCls } from "../ui";
+import { PageHeader, inputCls } from "../ui";
 
 interface HistoryEntry {
   id: number;
@@ -33,11 +33,11 @@ export default function History() {
   }, []);
 
   return (
-    <div className="max-w-3xl">
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-xl font-semibold">History</h1>
+    <div>
+      <div className="flex items-start justify-between">
+        <PageHeader title="History" subtitle="Every dictation, stored locally. Click one to see the raw transcript and timings." />
         <button
-          className="text-xs text-neutral-500 hover:text-red-400"
+          className="mt-1 text-xs text-neutral-500 transition-colors hover:text-red-400"
           onClick={() => invoke("history_clear").then(() => refresh())}
         >
           Clear all

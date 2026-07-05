@@ -9,7 +9,7 @@ import {
   OllamaStatus,
   ollamaStatus,
 } from "../../lib/ipc";
-import { Row, Section, Toggle, btnCls, inputCls } from "../ui";
+import { PageHeader, Row, Section, Toggle, btnCls, inputCls } from "../ui";
 
 function mb(bytes: number) {
   return `${Math.round(bytes / 1024 / 1024)} MB`;
@@ -44,8 +44,11 @@ export default function Models({
   const sttModels = models.filter((m) => m.kind === "stt");
 
   return (
-    <div className="max-w-2xl">
-      <h1 className="mb-6 text-xl font-semibold">Models</h1>
+    <div>
+      <PageHeader
+        title="Models & AI"
+        subtitle="Your on-device speech model and the local Ollama models that clean up and transform text."
+      />
 
       <Section title="Speech-to-text">
         {sttModels.map((m) => {
