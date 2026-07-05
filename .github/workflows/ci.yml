@@ -15,8 +15,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Install LLVM (libclang for whisper.cpp bindgen)
-        run: choco install llvm -y
+      - name: Install LLVM + CMake (whisper.cpp needs libclang + cmake)
+        run: choco install llvm cmake -y
+      - name: Expose libclang to bindgen
+        shell: pwsh
+        run: |
+          "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "C:\Program Files\CMake\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -58,6 +63,11 @@ jobs:
       - name: Linux system deps (libclang for bindgen, ALSA for cpal)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libclang-dev clang cmake libasound2-dev
+      - name: macOS system deps (libclang for bindgen, cmake)
+        if: runner.os == 'macOS'
+        run: |
+          brew install llvm cmake || true
+          echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
       - name: Clippy (portable crates)
         run: cargo clippy ${{ env.PORTABLE }} --all-targets -- -D warnings
