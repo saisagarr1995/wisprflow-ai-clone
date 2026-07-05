@@ -21,6 +21,9 @@ pub struct AppState {
 
 #[tauri::command]
 pub fn get_config(state: State<AppState>) -> Config {
+    // First call = the settings UI mounted and reached the backend. Logged so
+    // standalone runs can be verified without a visible screen.
+    tracing::info!("ui: get_config (frontend mounted)");
     state.settings.current()
 }
 

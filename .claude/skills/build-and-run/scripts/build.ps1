@@ -31,11 +31,16 @@ switch ($Task) {
     "fmt"    { cargo fmt --all }
     "check"  { Ensure-UI; cargo build --workspace }
     "run" {
+        # The app embeds the UI (no dev server), so we build the binary and
+        # launch it directly. Rebuild UI dist first so the latest UI is baked in.
         Stop-Process -Name "openflow-desktop" -Force -ErrorAction SilentlyContinue
         Push-Location "apps/desktop"
         if (-not (Test-Path "node_modules")) { npm install --no-audit --no-fund }
-        npm run tauri dev
+        npm run build
         Pop-Location
+        cargo build -p openflow-desktop
+        Start-Process "target/debug/openflow-desktop.exe"
+        Write-Host "OpenFlow launched (standalone). Check the system tray."
     }
     "bundle" {
         Push-Location "apps/desktop"

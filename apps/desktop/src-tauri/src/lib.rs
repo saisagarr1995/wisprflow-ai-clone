@@ -34,7 +34,9 @@ fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
             let _ = std::fs::create_dir_all(&dir);
             let appender = tracing_appender::rolling::daily(&dir, "openflow.log");
             let (nb, guard) = tracing_appender::non_blocking(appender);
-            let layer = tracing_subscriber::fmt::layer().with_ansi(false).with_writer(nb);
+            let layer = tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(nb);
             (Some(layer), Some(guard))
         }
         None => (None, None),
