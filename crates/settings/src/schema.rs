@@ -127,11 +127,13 @@ impl Default for LlmConfig {
         Self {
             enabled: true,
             base_url: "http://localhost:11434".into(),
-            // A single small model powers both the hot-path cleanup and
-            // rewrites out of the box, so first run needs one download.
-            // Users can point `rewrite_model` at a larger model for quality.
-            cleanup_model: "qwen3:4b".into(),
-            rewrite_model: "qwen3:4b".into(),
+            // A small, fast, non-thinking instruct model powers both the
+            // hot-path cleanup and rewrites out of the box (one download,
+            // usable on CPU-only machines). Thinking models like qwen3 are
+            // far slower on CPU; users with a GPU can point these at bigger
+            // models for higher quality.
+            cleanup_model: "llama3.2:3b".into(),
+            rewrite_model: "llama3.2:3b".into(),
             coding_model: None,
         }
     }

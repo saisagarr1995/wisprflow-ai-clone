@@ -49,6 +49,10 @@ impl LlmBackend for OllamaBackend {
             "messages": messages,
             "stream": false,
             "keep_alive": -1,
+            // Disable "thinking" for models that support it (qwen3, etc.):
+            // on the hot path it multiplies latency for no benefit here
+            // (design doc §3). Ignored by models without a thinking mode.
+            "think": false,
             "options": { "temperature": 0.1 },
         });
         if json {
@@ -86,6 +90,7 @@ impl LlmBackend for OllamaBackend {
             "messages": [{"role": "user", "content": "hi"}],
             "stream": false,
             "keep_alive": -1,
+            "think": false,
             "options": { "num_predict": 1 },
         });
         let started = std::time::Instant::now();
