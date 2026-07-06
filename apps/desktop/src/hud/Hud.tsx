@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import "./hud.css";
@@ -58,8 +58,9 @@ export default function Hud() {
     listen<string>("partial", (e) => {
       // Keep the newest words visible: the bubble is one line and its CSS
       // ellipsis would hide the end of long text, which is where speech is.
-      const t = e.payload;
-      setPartial(t.length > 46 ? "…" + t.slice(-46) : t);
+      const t = e.payload.trim();
+      if (/^[[(].*[\])]$/.test(t)) return; // stray non-speech annotation
+      setPartial(t.length > 58 ? "…" + t.slice(-58) : t);
     }).then((u) => unsubs.push(u));
 
     listen<string>("flash", (e) => {
@@ -108,7 +109,11 @@ export default function Hud() {
           <div className={`hud-pill ${state === "processing" ? "is-processing" : ""}`}>
             <div className="hud-wave">
               {bars.map((v, i) => (
-                <span key={i} className="hud-bar" style={{ height: `${6 + v * 20}px` }} />
+                <span
+                  key={i}
+                  className="hud-bar"
+                  style={{ height: `${6 + v * 20}px`, "--i": i } as CSSProperties}
+                />
               ))}
             </div>
           </div>

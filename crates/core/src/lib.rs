@@ -7,9 +7,11 @@
 //! session state, which is what keeps hotkey/audio/config races structurally
 //! impossible (design doc §5).
 
+mod finalizer;
 mod orchestrator;
 mod partial;
 
+pub use finalizer::{Committed, SharedStt, StreamFinalizer};
 pub use orchestrator::{
     AudioFactory, Callbacks, CommandRuntime, DictationTiming, Orchestrator, OrchestratorHandle,
     Services, SessionEvent, Status, SttFactory,

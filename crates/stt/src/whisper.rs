@@ -50,6 +50,10 @@ impl SttEngine for WhisperEngine {
         // Utterances are a single speaker pressing a hotkey: one segment
         // context, no need for the token history of previous calls.
         params.set_no_context(true);
+        // Never re-decode at higher temperatures on low confidence: the
+        // fallback ladder can multiply latency ~5x on hard audio, and
+        // dictation always prefers the fast greedy pass.
+        params.set_temperature_inc(0.0);
         if let Some(lang) = opts.language.as_deref() {
             params.set_language(Some(lang));
         }

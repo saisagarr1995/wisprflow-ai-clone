@@ -6,7 +6,9 @@ use crate::source::{AudioError, AudioSource};
 use crate::{samples_for_ms, TARGET_SAMPLE_RATE};
 
 /// Seconds of rolling history kept for session snapshots (max utterance).
-const HISTORY_SECS: usize = 30;
+/// Long-form dictation is common; 120 s costs under 8 MB at 16 kHz f32 and
+/// the streaming finalizer consumes the head as it goes anyway.
+const HISTORY_SECS: usize = 120;
 
 /// Owns continuous capture into a rolling buffer and cuts per-dictation
 /// sessions out of it. Capture runs from app start (design doc §2 stage 1:
