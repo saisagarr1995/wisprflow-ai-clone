@@ -65,7 +65,14 @@ impl PartialWorker {
                     if let Some((history, from)) = active.as_ref() {
                         let audio = {
                             let h = history.lock().expect("history lock");
-                            h.snapshot(*from, h.head())
+                            let head = h.head();
+                            // Sliding window: decode only the most recent few
+                            // seconds. Re-decoding the whole utterance grows
+                            // O(n²) and lags far behind speech on slow CPUs;
+                            // the final pass on release covers the full audio.
+                            let window = TARGET_SAMPLE_RATE as u64 * 5;
+                            let start = (*from).max(head.saturating_sub(window));
+                            h.snapshot(start, head)
                         };
                         // Skip until there's half a second to say anything about.
                         if audio.len() < TARGET_SAMPLE_RATE as usize / 2 {

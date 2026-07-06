@@ -55,7 +55,12 @@ export default function Hud() {
       setBars(next);
     }).then((u) => unsubs.push(u));
 
-    listen<string>("partial", (e) => setPartial(e.payload)).then((u) => unsubs.push(u));
+    listen<string>("partial", (e) => {
+      // Keep the newest words visible: the bubble is one line and its CSS
+      // ellipsis would hide the end of long text, which is where speech is.
+      const t = e.payload;
+      setPartial(t.length > 46 ? "…" + t.slice(-46) : t);
+    }).then((u) => unsubs.push(u));
 
     listen<string>("flash", (e) => {
       window.clearTimeout(flashTimer.current);
