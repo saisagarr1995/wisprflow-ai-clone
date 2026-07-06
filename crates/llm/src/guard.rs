@@ -10,6 +10,9 @@ pub enum GuardReject {
     MetaText,
     /// Output empty after sanitizing.
     Empty,
+    /// Output is mostly words the speaker never said — the model answered or
+    /// commented on the dictation instead of cleaning it.
+    NewContent,
 }
 
 const META_PREFIXES: &[&str] = &[
@@ -82,7 +85,31 @@ pub fn sanitize(llm_output: &str, original: &str) -> Result<String, GuardReject>
         return Err(GuardReject::LengthRatio);
     }
 
+    // Cleanup rearranges and trims the speaker's words; it does not invent
+    // many. If most content words are new, the model answered the dictation
+    // (e.g. replied to a dictated question) instead of transcribing it.
+    let in_words: std::collections::HashSet<String> = content_words(original).collect();
+    let out_words: Vec<String> = content_words(text).collect();
+    if in_words.len() >= 4 && !out_words.is_empty() {
+        let novel = out_words
+            .iter()
+            .filter(|w| !in_words.contains(w.as_str()))
+            .count();
+        if novel * 3 > out_words.len() {
+            return Err(GuardReject::NewContent);
+        }
+    }
+
     Ok(text.to_string())
+}
+
+/// Lowercased alphanumeric words of 3+ chars — the words that carry content.
+/// Short glue words ("a", "is", "to") are skipped: the model may add or drop
+/// those legitimately while fixing grammar.
+fn content_words(s: &str) -> impl Iterator<Item = String> + '_ {
+    s.split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.chars().count() >= 3)
+        .map(|w| w.to_lowercase())
 }
 
 #[cfg(test)]
@@ -150,5 +177,37 @@ mod tests {
     #[test]
     fn rejects_empty() {
         assert_eq!(sanitize("   ", "hello"), Err(GuardReject::Empty));
+    }
+
+    #[test]
+    fn rejects_answers_to_dictated_questions() {
+        // The speaker dictated a question; the model answered it instead of
+        // writing the question down.
+        assert_eq!(
+            sanitize(
+                "You should restart the router first, then check the cable connections and update the firmware.",
+                "um how do I fix my internet connection at home"
+            ),
+            Err(GuardReject::NewContent)
+        );
+    }
+
+    #[test]
+    fn allows_cleanup_that_reuses_the_speakers_words() {
+        assert_eq!(
+            sanitize(
+                "How do I fix my internet connection at home?",
+                "um how do I fix my uh internet connection at home"
+            ),
+            Ok("How do I fix my internet connection at home?".into())
+        );
+        // List formatting keeps the speaker's content words.
+        assert_eq!(
+            sanitize(
+                "1. Update the docs\n2. Run the tests",
+                "first we need to update the docs second run the tests"
+            ),
+            Ok("1. Update the docs\n2. Run the tests".into())
+        );
     }
 }
