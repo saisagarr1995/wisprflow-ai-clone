@@ -48,15 +48,16 @@ export function Row({
 export function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
   return (
     <button
+      type="button"
       onClick={() => onChange(!value)}
-      className={`relative h-6 w-11 rounded-full transition-colors duration-200 ${
-        value ? "bg-indigo-500" : "bg-white/12"
-      }`}
       role="switch"
       aria-checked={value}
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 ${
+        value ? "bg-indigo-500" : "bg-white/15"
+      }`}
     >
       <span
-        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-200 ${
+        className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 ${
           value ? "translate-x-[22px]" : "translate-x-0.5"
         }`}
       />

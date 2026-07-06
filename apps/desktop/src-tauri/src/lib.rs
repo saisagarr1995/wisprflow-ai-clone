@@ -56,6 +56,18 @@ pub fn run() {
     // ("copy debug bundle"); stdout is for `tauri dev`.
     let _log_guard = init_logging();
 
+    // Panic hook that writes synchronously to crash.log — the async file logger
+    // can lose buffered lines when the process dies, so panics need their own
+    // durable path.
+    std::panic::set_hook(Box::new(|info| {
+        let bt = std::backtrace::Backtrace::force_capture();
+        let msg = format!("PANIC: {info}\n{bt}");
+        tracing::error!("{msg}");
+        if let Some(dir) = openflow_store::default_db_path().parent() {
+            let _ = std::fs::write(dir.join("crash.log"), &msg);
+        }
+    }));
+
     let (settings, config_rx) =
         openflow_settings::SettingsHandle::init(openflow_settings::config_path())
             .expect("settings must load or initialize");
@@ -73,6 +85,7 @@ pub fn run() {
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             commands::get_config,
+            commands::ui_log,
             commands::set_config,
             commands::list_devices,
             commands::get_level,
@@ -473,10 +486,37 @@ fn position_hud_bottom_center(hud: &tauri::WebviewWindow) {
     let msize = monitor.size();
     let scale = monitor.scale_factor();
     let x = mpos.x + (msize.width as i32 - size.width as i32) / 2;
-    // Sit just above the taskbar / screen edge.
-    let gap = (12.0 * scale) as i32;
-    let y = mpos.y + msize.height as i32 - size.height as i32 - gap;
+    // Anchor to the bottom of the *work area* (above the taskbar) so the pill
+    // is never hidden behind it. Falls back to the full monitor height.
+    let bottom = work_area_bottom().unwrap_or(mpos.y + msize.height as i32);
+    let gap = (10.0 * scale) as i32;
+    let y = bottom - size.height as i32 - gap;
     let _ = hud.set_position(tauri::PhysicalPosition { x, y });
+}
+
+/// Bottom edge (physical px) of the primary monitor's work area — the screen
+/// minus the taskbar. Used to keep the HUD above the taskbar.
+#[cfg(windows)]
+fn work_area_bottom() -> Option<i32> {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SystemParametersInfoW, SPI_GETWORKAREA, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+    };
+    let mut rect = RECT::default();
+    let ok = unsafe {
+        SystemParametersInfoW(
+            SPI_GETWORKAREA,
+            0,
+            Some(&mut rect as *mut RECT as *mut core::ffi::c_void),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    };
+    ok.is_ok().then_some(rect.bottom)
+}
+
+#[cfg(not(windows))]
+fn work_area_bottom() -> Option<i32> {
+    None
 }
 
 /// Built-in commands plus any the user defined in the store.

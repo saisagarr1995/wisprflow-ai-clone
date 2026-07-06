@@ -48,7 +48,10 @@ impl LlmBackend for OllamaBackend {
             "model": model,
             "messages": messages,
             "stream": false,
-            "keep_alive": -1,
+            // Keep the model warm during an active session but let Ollama free
+            // its RAM after ~10 min idle (important on memory-limited machines).
+            // It reloads on the next dictation.
+            "keep_alive": "10m",
             // Disable "thinking" for models that support it (qwen3, etc.):
             // on the hot path it multiplies latency for no benefit here
             // (design doc §3). Ignored by models without a thinking mode.
@@ -89,7 +92,7 @@ impl LlmBackend for OllamaBackend {
             "model": model,
             "messages": [{"role": "user", "content": "hi"}],
             "stream": false,
-            "keep_alive": -1,
+            "keep_alive": "10m",
             "think": false,
             "options": { "num_predict": 1 },
         });

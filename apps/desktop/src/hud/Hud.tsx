@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import "./hud.css";
+
+const log = (msg: string) => invoke("ui_log", { msg }).catch(() => {});
 
 type HudState = "idle" | "recording" | "processing" | "flash";
 
@@ -26,9 +29,11 @@ export default function Hud() {
 
   useEffect(() => {
     const unsubs: Array<() => void> = [];
+    log("hud mounted");
 
     listen<string>("status", (e) => {
       const s = e.payload as "idle" | "recording" | "processing";
+      log(`hud status=${s}`);
       setState(s);
       if (s === "recording") {
         setPartial("");

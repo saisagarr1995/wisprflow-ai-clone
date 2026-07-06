@@ -88,11 +88,12 @@ pub struct SttConfig {
 
 impl Default for SttConfig {
     fn default() -> Self {
-        // Small default so first-run download is quick; the onboarding wizard
-        // upgrades this once the user picks a real model.
+        // base.en balances accuracy and speed on CPU. tiny is noticeably worse
+        // on short/real-world phrases; small.en (in the registry) is more
+        // accurate but slower — users can upgrade in Settings → Models.
         Self {
             engine: SttEngineKind::Auto,
-            model_id: "whisper-tiny".into(),
+            model_id: "whisper-base".into(),
         }
     }
 }

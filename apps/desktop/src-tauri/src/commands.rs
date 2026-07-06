@@ -27,6 +27,13 @@ pub fn get_config(state: State<AppState>) -> Config {
     state.settings.current()
 }
 
+/// Lets any window report to the log file (used to trace HUD lifecycle on
+/// headless/standalone runs where the webview console isn't visible).
+#[tauri::command]
+pub fn ui_log(msg: String) {
+    tracing::info!("ui: {msg}");
+}
+
 #[tauri::command]
 pub fn set_config(state: State<AppState>, config: Config) -> Result<(), String> {
     state
