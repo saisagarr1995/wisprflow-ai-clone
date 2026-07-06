@@ -35,6 +35,12 @@ impl WhisperEngine {
 impl SttEngine for WhisperEngine {
     fn transcribe(&mut self, audio: &[f32], opts: &TranscribeOpts) -> Result<Transcript, SttError> {
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+        // whisper.cpp defaults to min(4, cores), leaving half of an 8-core
+        // CPU idle for the latency-critical final pass.
+        let threads = opts.threads.unwrap_or_else(|| {
+            (std::thread::available_parallelism().map_or(4, |n| n.get() as i32) - 1).max(2)
+        });
+        params.set_n_threads(threads);
         params.set_translate(false);
         params.set_print_progress(false);
         params.set_print_realtime(false);

@@ -253,7 +253,7 @@ fn bootstrap_pipeline(
                 Box::new(move |text| {
                     let _ = partial_app.emit("partial", text);
                 }),
-                std::time::Duration::from_millis(700),
+                std::time::Duration::from_millis(350),
             ))
         }
         Err(e) => {
