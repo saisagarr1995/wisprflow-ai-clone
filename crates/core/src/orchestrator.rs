@@ -6,6 +6,7 @@ use openflow_inject::Injector;
 use openflow_settings::{Config, HotkeyMode};
 use openflow_stt::{SttEngine, TranscribeOpts};
 
+use crate::finalizer::{SharedStt, StreamFinalizer};
 use crate::partial::PartialWorker;
 
 /// Events posted into the orchestrator from hotkey/audio/UI threads.
@@ -51,10 +52,16 @@ pub type AudioFactory = Box<dyn Fn(Option<String>) -> AudioEngine + Send>;
 
 pub struct Services {
     pub audio: AudioEngine,
-    pub stt: Box<dyn SttEngine>,
+    /// The final engine, shared with the streaming finalizer so chunks can be
+    /// committed while the user is still speaking.
+    pub stt: SharedStt,
     pub vad: Option<Box<dyn Vad>>,
     pub injector: Box<dyn Injector>,
     pub partials: Option<PartialWorker>,
+    /// Commits chunks of the utterance with the final engine while the user
+    /// is still speaking, so release only decodes the tail. `None` = decode
+    /// everything at release (tests, or when spawning the worker failed).
+    pub finalizer: Option<StreamFinalizer>,
     pub stt_factory: Option<SttFactory>,
     pub audio_factory: Option<AudioFactory>,
     /// LLM cleanup; `None` = deterministic transcripts only.
@@ -88,6 +95,10 @@ pub struct Orchestrator {
     callbacks: Callbacks,
     rx: mpsc::Receiver<SessionEvent>,
     state: State,
+    /// Absolute sample index where the current session began.
+    session_start: u64,
+    /// Decode options built at key-down; chunk and tail passes must agree.
+    session_opts: TranscribeOpts,
     /// Context captured at key-down (design doc §7: parallel to speaking).
     session_context: Option<SessionContext>,
     /// Last text injected, used as the operand for commands when nothing is
@@ -133,6 +144,8 @@ impl Orchestrator {
                 callbacks,
                 rx,
                 state: State::Idle,
+                session_start: 0,
+                session_opts: TranscribeOpts::default(),
                 session_context: None,
                 last_injection: None,
             },
@@ -177,7 +190,7 @@ impl Orchestrator {
             if let Some(factory) = self.services.stt_factory.as_ref() {
                 match factory(&new.stt.model_id) {
                     Ok(engine) => {
-                        self.services.stt = engine;
+                        *self.services.stt.lock().expect("stt lock") = engine;
                         tracing::info!(model = new.stt.model_id, "stt engine rebuilt");
                     }
                     Err(e) => {
@@ -222,6 +235,17 @@ impl Orchestrator {
             tracing::debug!(process = app.process, ?profile, "session context captured");
             Some(SessionContext { app, profile, text })
         });
+        // Build decode options now (bias needs the captured context) and hand
+        // the finalizer the session so it can commit chunks while we record.
+        self.session_start = start;
+        self.session_opts = self.build_opts();
+        if let Some(finalizer) = self.services.finalizer.as_ref() {
+            finalizer.start(
+                self.services.audio.history_handle(),
+                start,
+                self.session_opts.clone(),
+            );
+        }
         self.state = State::Recording;
         (self.callbacks.on_status)(Status::Recording);
         tracing::debug!("recording started");
@@ -236,56 +260,72 @@ impl Orchestrator {
         let started = Instant::now();
         let mut timing = DictationTiming::default();
 
+        // Everything the finalizer committed while the user was speaking;
+        // only the audio after `committed.until` still needs a decode.
+        let committed = self
+            .services
+            .finalizer
+            .as_ref()
+            .map(|f| f.finish())
+            .unwrap_or_default();
+
         let outcome = self.services.audio.end_session().and_then(|audio| {
             timing.audio_ms = (audio.len() as u64 * 1000) / TARGET_SAMPLE_RATE as u64;
-            let audio = self.trimmed(audio);
+            let audio = if committed.text.is_empty() {
+                self.trimmed(audio)
+            } else {
+                let done = committed.until.saturating_sub(self.session_start) as usize;
+                self.trimmed(audio.get(done..).map(<[f32]>::to_vec).unwrap_or_default())
+            };
             // Sub-300 ms utterances are hotkey fumbles, and Whisper
             // hallucinates on near-silence — skip them.
             if audio.len() < (TARGET_SAMPLE_RATE as usize) * 3 / 10 {
-                tracing::debug!(samples = audio.len(), "utterance too short; skipped");
+                tracing::debug!(samples = audio.len(), "utterance/tail too short; skipped");
                 return None;
             }
             Some(audio)
         });
 
         let session_context = self.session_context.take();
-        if let Some(audio) = outcome {
+        {
             // Personalization inputs (design doc §2 stage 5).
             let (dict_terms, snippet_defs) = self.personalization();
 
-            // STT bias: dictionary words + entities from on-screen text (§7).
-            let mut bias_parts: Vec<String> = Vec::new();
-            if let Some(bias) = openflow_postproc::dictionary::bias_prompt(&dict_terms) {
-                bias_parts.push(bias);
-            }
-            if let Some(ctx) = session_context.as_ref() {
-                let mut screen_text = ctx.text.preceding_text.clone().unwrap_or_default();
-                if let Some(sel) = &ctx.text.selection {
-                    screen_text.push(' ');
-                    screen_text.push_str(sel);
-                }
-                let entities = openflow_context::extract_entities(&screen_text, 12);
-                if !entities.is_empty() {
-                    bias_parts.push(entities.join(", "));
-                }
-            }
-            let opts = TranscribeOpts {
-                language: match self.config.language.as_str() {
-                    "auto" => None,
-                    lang => Some(lang.to_string()),
-                },
-                initial_prompt: if bias_parts.is_empty() {
-                    None
-                } else {
-                    Some(bias_parts.join(", "))
-                },
-                threads: None,
-            };
+            // Decode the remaining tail with the options built at key-down
+            // (same bias the chunk passes saw).
+            let opts = self.session_opts.clone();
             let stt_started = Instant::now();
-            match self.services.stt.transcribe(&audio, &opts) {
-                Ok(t) if !t.text.trim().is_empty() => {
-                    timing.stt_ms = stt_started.elapsed().as_millis() as u64;
-                    let raw = t.text.trim().to_string();
+            let tail = match outcome {
+                Some(audio) => {
+                    let result = self
+                        .services
+                        .stt
+                        .lock()
+                        .expect("stt lock")
+                        .transcribe(&audio, &opts);
+                    match result {
+                        Ok(t) => t.text.trim().to_string(),
+                        Err(e) => {
+                            tracing::error!(error = %e, "transcription failed");
+                            String::new()
+                        }
+                    }
+                }
+                None => String::new(),
+            };
+            timing.stt_ms = stt_started.elapsed().as_millis() as u64;
+
+            let mut joined = committed.text;
+            if !tail.is_empty() {
+                if !joined.is_empty() {
+                    joined.push(' ');
+                }
+                joined.push_str(&tail);
+            }
+            match joined.trim() {
+                "" => tracing::debug!("empty transcript; nothing to inject"),
+                r => {
+                    let raw = r.to_string();
 
                     // Voice command? (design doc §10). Operand = selection, or
                     // the last dictation. Runs before the dictation path.
@@ -411,11 +451,43 @@ impl Orchestrator {
                         Err(e) => tracing::error!(error = %e, "injection failed"),
                     }
                 }
-                Ok(_) => tracing::debug!("empty transcript; nothing to inject"),
-                Err(e) => tracing::error!(error = %e, "transcription failed"),
             }
         }
         (self.callbacks.on_status)(Status::Idle);
+    }
+
+    /// Decode options for the current session, built at key-down so the
+    /// chunk finalizer and the release-time tail pass agree. STT bias:
+    /// dictionary words + entities from on-screen text (§7).
+    fn build_opts(&self) -> TranscribeOpts {
+        let (dict_terms, _) = self.personalization();
+        let mut bias_parts: Vec<String> = Vec::new();
+        if let Some(bias) = openflow_postproc::dictionary::bias_prompt(&dict_terms) {
+            bias_parts.push(bias);
+        }
+        if let Some(ctx) = self.session_context.as_ref() {
+            let mut screen_text = ctx.text.preceding_text.clone().unwrap_or_default();
+            if let Some(sel) = &ctx.text.selection {
+                screen_text.push(' ');
+                screen_text.push_str(sel);
+            }
+            let entities = openflow_context::extract_entities(&screen_text, 12);
+            if !entities.is_empty() {
+                bias_parts.push(entities.join(", "));
+            }
+        }
+        TranscribeOpts {
+            language: match self.config.language.as_str() {
+                "auto" => None,
+                lang => Some(lang.to_string()),
+            },
+            initial_prompt: if bias_parts.is_empty() {
+                None
+            } else {
+                Some(bias_parts.join(", "))
+            },
+            threads: None,
+        }
     }
 
     /// Try to interpret the utterance as a voice command (design doc §10).
@@ -570,10 +642,11 @@ mod tests {
         let (orch, handle) = Orchestrator::new(
             Services {
                 audio,
-                stt: Box::new(stt),
+                stt: Arc::new(Mutex::new(Box::new(stt) as Box<dyn SttEngine>)),
                 vad: None,
                 injector: Box::new(injector.clone()),
                 partials: None,
+                finalizer: None,
                 stt_factory: None,
                 audio_factory: None,
                 cleanup,
@@ -742,10 +815,13 @@ mod tests {
         let (orch, handle) = Orchestrator::new(
             Services {
                 audio,
-                stt: Box::new(FakeStt::with_responses(["make it shorter"])),
+                stt: Arc::new(Mutex::new(
+                    Box::new(FakeStt::with_responses(["make it shorter"])) as Box<dyn SttEngine>,
+                )),
                 vad: None,
                 injector: Box::new(injector.clone()),
                 partials: None,
+                finalizer: None,
                 stt_factory: None,
                 audio_factory: None,
                 cleanup: None,
@@ -805,10 +881,13 @@ mod tests {
         let (orch, handle) = Orchestrator::new(
             Services {
                 audio,
-                stt: Box::new(FakeStt::with_responses(["get user by id camel case"])),
+                stt: Arc::new(Mutex::new(Box::new(FakeStt::with_responses([
+                    "get user by id camel case",
+                ])) as Box<dyn SttEngine>)),
                 vad: None,
                 injector: Box::new(FakeInjector::default()),
                 partials: None,
+                finalizer: None,
                 stt_factory: None,
                 audio_factory: None,
                 cleanup: Some(cleanup),
@@ -863,10 +942,13 @@ mod tests {
         let (orch, handle) = Orchestrator::new(
             Services {
                 audio,
-                stt: Box::new(FakeStt::with_responses(["um hey ship it monday"])),
+                stt: Arc::new(Mutex::new(Box::new(FakeStt::with_responses([
+                    "um hey ship it monday",
+                ])) as Box<dyn SttEngine>)),
                 vad: None,
                 injector: Box::new(injector.clone()),
                 partials: None,
+                finalizer: None,
                 stt_factory: None,
                 audio_factory: None,
                 cleanup: Some(cleanup),

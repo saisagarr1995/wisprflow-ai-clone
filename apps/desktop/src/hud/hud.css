@@ -36,12 +36,12 @@
 }
 
 .hud-partial {
-  max-width: 340px;
-  padding: 7px 15px;
+  max-width: 430px;
+  padding: 8px 16px;
   border-radius: 999px;
   background: #0b0b0d;
   color: #f4f4f5;
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 550;
   line-height: 1.25;
   letter-spacing: 0.1px;
@@ -71,6 +71,13 @@
 
 .hud-pill.is-processing {
   animation: hud-rise 160ms ease-out, hud-breathe 1.4s ease-in-out infinite 160ms;
+}
+
+/* While the final pass runs, the frozen waveform becomes a travelling
+   "thinking" ripple (Wispr-style) so the pill clearly reads as working. */
+.hud-pill.is-processing .hud-bar {
+  animation: hud-think 1s ease-in-out infinite;
+  animation-delay: calc(var(--i, 0) * 55ms);
 }
 
 .hud-wave {
@@ -126,5 +133,17 @@
   }
   50% {
     opacity: 0.72;
+  }
+}
+
+@keyframes hud-think {
+  0%,
+  100% {
+    height: 6px;
+    opacity: 0.55;
+  }
+  50% {
+    height: 18px;
+    opacity: 1;
   }
 }

@@ -229,7 +229,14 @@ fn bootstrap_pipeline(
             .map_err(|e| e.to_string())
     });
 
-    let stt = stt_factory(&config.stt.model_id)?;
+    // Shared with the streaming finalizer inside the orchestrator, which
+    // commits chunks of the utterance while the user is still speaking.
+    let stt: openflow_core::SharedStt =
+        std::sync::Arc::new(std::sync::Mutex::new(stt_factory(&config.stt.model_id)?));
+    let finalizer = Some(openflow_core::StreamFinalizer::spawn(
+        stt.clone(),
+        std::time::Duration::from_millis(400),
+    ));
     let audio = audio_factory(config.audio.input_device.clone());
 
     let vad_path = openflow_models::ensure("silero-vad-v5", |_| {}).map_err(|e| e.to_string())?;
@@ -299,6 +306,7 @@ fn bootstrap_pipeline(
             vad,
             injector: Box::new(injector),
             partials,
+            finalizer,
             stt_factory: Some(stt_factory),
             audio_factory: Some(audio_factory),
             cleanup,
