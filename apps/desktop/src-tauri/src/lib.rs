@@ -82,6 +82,15 @@ pub fn run() {
     };
 
     tauri::Builder::default()
+        // Must be the first plugin: a second launch exits immediately and the
+        // running instance surfaces its settings window instead. Two instances
+        // would both hook the hotkey and inject the transcript twice.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+        }))
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             commands::get_config,
