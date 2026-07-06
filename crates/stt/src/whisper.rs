@@ -68,12 +68,64 @@ impl SttEngine for WhisperEngine {
         }
 
         Ok(Transcript {
-            text: text.trim().to_string(),
+            text: strip_annotations(&text),
             language: opts.language.clone(),
         })
     }
 
     fn describe(&self) -> String {
         format!("whisper.cpp {} (CPU)", self.model_name)
+    }
+}
+
+/// Whisper emits non-speech annotations as ordinary segment text —
+/// "[BLANK_AUDIO]", "[ Silence ]", "(sighs)", "♪". For dictation they are
+/// noise: they must never reach the HUD partial bubble or be injected.
+/// Square-bracket chunks and music notes are always annotations and are
+/// removed anywhere; parenthesised/starred text is only dropped when it is
+/// the *entire* transcript, so legitimate mid-sentence parentheses survive.
+fn strip_annotations(text: &str) -> String {
+    let t = text.trim();
+    let whole = (t.starts_with('(') && t.ends_with(')'))
+        || (t.starts_with('*') && t.ends_with('*') && t.len() > 1);
+    if whole {
+        return String::new();
+    }
+    let mut out = String::with_capacity(t.len());
+    let mut depth = 0usize;
+    for c in t.chars() {
+        match c {
+            '[' => depth += 1,
+            ']' => depth = depth.saturating_sub(1),
+            '♪' => {}
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_annotations;
+
+    #[test]
+    fn drops_blank_audio_and_bracket_annotations() {
+        assert_eq!(strip_annotations("[BLANK_AUDIO]"), "");
+        assert_eq!(strip_annotations(" [ Silence ] "), "");
+        assert_eq!(strip_annotations("hello [BLANK_AUDIO] world"), "hello world");
+        assert_eq!(strip_annotations("♪"), "");
+    }
+
+    #[test]
+    fn drops_whole_string_sound_events_only() {
+        assert_eq!(strip_annotations("(sighs)"), "");
+        assert_eq!(strip_annotations("*cough*"), "");
+        assert_eq!(strip_annotations("keep (this) inline"), "keep (this) inline");
+    }
+
+    #[test]
+    fn passes_plain_speech_through() {
+        assert_eq!(strip_annotations("  send the report today  "), "send the report today");
     }
 }

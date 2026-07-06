@@ -25,6 +25,7 @@ export default function Hud() {
   const [flash, setFlash] = useState("");
   const [bars, setBars] = useState<number[]>(IDLE_BARS);
   const levelsRef = useRef<number[]>([...IDLE_BARS]);
+  const peakRef = useRef(0.02);
   const flashTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
@@ -39,13 +40,16 @@ export default function Hud() {
         setPartial("");
         setFlash("");
         levelsRef.current = [...IDLE_BARS];
+        peakRef.current = 0.02;
         setBars([...IDLE_BARS]);
       }
     }).then((u) => unsubs.push(u));
 
     listen<number>("level", (e) => {
-      // Map RMS → bar height with headroom; scroll the ring left.
-      const v = Math.min(1, Math.max(0.12, e.payload * 7));
+      // Auto-gain: normalise RMS against a decaying peak so speech visibly
+      // waves at any mic gain, while true silence stays at the floor.
+      peakRef.current = Math.max(e.payload, peakRef.current * 0.94, 0.02);
+      const v = Math.min(1, Math.max(0.12, Math.pow(e.payload / peakRef.current, 0.7)));
       const next = [...levelsRef.current.slice(1), v];
       levelsRef.current = next;
       setBars(next);
