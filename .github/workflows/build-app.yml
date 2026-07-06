@@ -1,0 +1,52 @@
+name: Build Windows App
+
+# Builds the OpenFlow desktop app on GitHub's runners (16 GB RAM) and uploads
+# the installer + standalone exe as downloadable artifacts — so you never have
+# to compile locally. Runs on every push to main, or on demand.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install LLVM + CMake (whisper.cpp needs libclang + cmake)
+        run: choco install llvm cmake -y
+      - name: Expose libclang + cmake
+        shell: pwsh
+        run: |
+          "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "C:\Program Files\CMake\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install UI deps
+        run: npm ci
+        working-directory: apps/desktop
+
+      # Produces the NSIS installer (.exe) + MSI + the standalone binary.
+      - name: Build installer (tauri build)
+        run: npm run tauri build
+        working-directory: apps/desktop
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenFlow-Windows-Installer
+          path: |
+            apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+            apps/desktop/src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: warn
+
+      - name: Upload standalone exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenFlow-Windows-Standalone
+          path: apps/desktop/src-tauri/target/release/openflow-desktop.exe
+          if-no-files-found: warn
