@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Config, getLevel, listDevices } from "../../lib/ipc";
-import { PageHeader, Row, Section, selectCls } from "../ui";
+import { PageHeader, Row, Section, Select, inputCls } from "../ui";
 
 export default function Microphone({
   config,
@@ -26,20 +26,15 @@ export default function Microphone({
 
       <Section title="Input device">
         <Row label="Device" hint="Changing devices takes effect immediately">
-          <select
-            className={selectCls + " max-w-72"}
+          <Select
+            className="w-72"
             value={config.audio.input_device ?? ""}
-            onChange={(e) =>
-              update((c) => void (c.audio.input_device = e.target.value || null))
-            }
-          >
-            <option value="">System default</option>
-            {devices.map((d) => (
-              <option key={d} value={d}>
-                {d}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => update((c) => void (c.audio.input_device = v || null))}
+            options={[
+              { value: "", label: "System default" },
+              ...devices.map((d) => ({ value: d, label: d })),
+            ]}
+          />
         </Row>
         <Row label="Input level" hint="Speak — the bar should move">
           <div className="h-3 w-56 overflow-hidden rounded-full bg-neutral-800">
@@ -55,7 +50,7 @@ export default function Microphone({
         >
           <input
             type="number"
-            className={selectCls + " w-24"}
+            className={inputCls + " w-24"}
             value={config.audio.preroll_ms}
             min={0}
             max={1000}

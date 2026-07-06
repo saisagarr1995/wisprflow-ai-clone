@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { PageHeader, Section, btnCls, inputCls, selectCls } from "../ui";
+import { PageHeader, Section, Select, btnCls, inputCls } from "../ui";
 
 interface CustomCommand {
   id: number;
@@ -78,10 +78,15 @@ export default function Commands() {
             value={triggers}
             onChange={(e) => setTriggers(e.target.value)}
           />
-          <select className={selectCls} value={outputMode} onChange={(e) => setOutputMode(e.target.value)}>
-            <option value="replace">Replace selection</option>
-            <option value="popover">Show in popover</option>
-          </select>
+          <Select
+            className="w-48"
+            value={outputMode}
+            onChange={setOutputMode}
+            options={[
+              { value: "replace", label: "Replace selection" },
+              { value: "popover", label: "Show in popover" },
+            ]}
+          />
         </div>
         <textarea
           className={inputCls + " h-20 w-full resize-y font-mono text-xs"}
