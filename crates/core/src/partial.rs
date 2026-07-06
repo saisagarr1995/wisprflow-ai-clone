@@ -78,7 +78,13 @@ impl PartialWorker {
                         if audio.len() < TARGET_SAMPLE_RATE as usize / 2 {
                             continue;
                         }
-                        match stt.transcribe(&audio, &TranscribeOpts::default()) {
+                        // Few threads: captions are a nicety; they must never
+                        // starve the final pass, the UI, or other apps.
+                        let opts = TranscribeOpts {
+                            threads: Some(3),
+                            ..TranscribeOpts::default()
+                        };
+                        match stt.transcribe(&audio, &opts) {
                             Ok(t) if !t.text.trim().is_empty() => on_partial(t.text),
                             Ok(_) => {}
                             Err(e) => tracing::debug!(error = %e, "partial decode failed"),

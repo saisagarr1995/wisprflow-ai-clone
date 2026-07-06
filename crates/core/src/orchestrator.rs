@@ -279,6 +279,7 @@ impl Orchestrator {
                 } else {
                     Some(bias_parts.join(", "))
                 },
+                threads: None,
             };
             let stt_started = Instant::now();
             match self.services.stt.transcribe(&audio, &opts) {

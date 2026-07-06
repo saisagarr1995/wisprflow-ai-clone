@@ -81,6 +81,7 @@ mod tests {
         let opts = TranscribeOpts {
             language: Some("hi".into()),
             initial_prompt: Some("kubectl".into()),
+            ..TranscribeOpts::default()
         };
         stt.transcribe(&[0.0; 1600], &opts).unwrap();
         let calls = stt.calls.lock().unwrap();
