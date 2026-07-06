@@ -113,7 +113,10 @@ mod tests {
     fn drops_blank_audio_and_bracket_annotations() {
         assert_eq!(strip_annotations("[BLANK_AUDIO]"), "");
         assert_eq!(strip_annotations(" [ Silence ] "), "");
-        assert_eq!(strip_annotations("hello [BLANK_AUDIO] world"), "hello world");
+        assert_eq!(
+            strip_annotations("hello [BLANK_AUDIO] world"),
+            "hello world"
+        );
         assert_eq!(strip_annotations("♪"), "");
     }
 
@@ -121,11 +124,17 @@ mod tests {
     fn drops_whole_string_sound_events_only() {
         assert_eq!(strip_annotations("(sighs)"), "");
         assert_eq!(strip_annotations("*cough*"), "");
-        assert_eq!(strip_annotations("keep (this) inline"), "keep (this) inline");
+        assert_eq!(
+            strip_annotations("keep (this) inline"),
+            "keep (this) inline"
+        );
     }
 
     #[test]
     fn passes_plain_speech_through() {
-        assert_eq!(strip_annotations("  send the report today  "), "send the report today");
+        assert_eq!(
+            strip_annotations("  send the report today  "),
+            "send the report today"
+        );
     }
 }
