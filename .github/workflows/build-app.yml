@@ -36,16 +36,18 @@ jobs:
         run: npm run tauri build -- --bundles nsis
         working-directory: apps/desktop
 
+      # This is a Cargo workspace, so build output lands in the workspace-root
+      # target/, not the crate's own directory.
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
           name: OpenFlow-Windows-Installer
-          path: apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
-          if-no-files-found: warn
+          path: target/release/bundle/nsis/*.exe
+          if-no-files-found: error
 
       - name: Upload standalone exe
         uses: actions/upload-artifact@v4
         with:
           name: OpenFlow-Windows-Standalone
-          path: apps/desktop/src-tauri/target/release/openflow-desktop.exe
-          if-no-files-found: warn
+          path: target/release/openflow-desktop.exe
+          if-no-files-found: error
