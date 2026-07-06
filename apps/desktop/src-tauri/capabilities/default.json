@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Core IPC (invoke + event listen) for every OpenFlow window. Without this the HUD's listen(\"status\"/\"level\") calls are denied by the v2 ACL and the pill never leaves the idle state.",
+  "windows": ["*"],
+  "permissions": ["core:default"]
+}
