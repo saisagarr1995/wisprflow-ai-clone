@@ -1,5 +1,5 @@
 import { Config } from "../../lib/ipc";
-import { PageHeader, Row, Section, selectCls, inputCls } from "../ui";
+import { PageHeader, Row, Section, Select, inputCls } from "../ui";
 
 const HOTKEY_PRESETS = ["RCtrl", "RAlt", "F9", "Ctrl+Shift+Space", "Ctrl+Shift+D"];
 const LANGUAGES: Array<[string, string]> = [
@@ -30,22 +30,19 @@ export default function General({
       <Section title="Dictation hotkey">
         <Row label="Hotkey" hint="Preset chords; or type a custom one like Alt+Z">
           <div className="flex gap-2">
-            <select
-              className={selectCls}
+            <Select
+              className="w-44"
               value={HOTKEY_PRESETS.includes(config.hotkey.chord) ? config.hotkey.chord : "custom"}
-              onChange={(e) => {
-                if (e.target.value !== "custom") {
-                  update((c) => void (c.hotkey.chord = e.target.value));
+              onChange={(v) => {
+                if (v !== "custom") {
+                  update((c) => void (c.hotkey.chord = v));
                 }
               }}
-            >
-              {HOTKEY_PRESETS.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-              <option value="custom">Custom…</option>
-            </select>
+              options={[
+                ...HOTKEY_PRESETS.map((p) => ({ value: p, label: p })),
+                { value: "custom", label: "Custom…" },
+              ]}
+            />
             <input
               className={inputCls + " w-40"}
               value={config.hotkey.chord}
@@ -58,32 +55,26 @@ export default function General({
           label="Mode"
           hint="Hold: press and hold to talk. Toggle: press once to start, again to stop."
         >
-          <select
-            className={selectCls}
+          <Select
+            className="w-52"
             value={config.hotkey.mode}
-            onChange={(e) =>
-              update((c) => void (c.hotkey.mode = e.target.value as "hold" | "toggle"))
-            }
-          >
-            <option value="hold">Hold (push-to-talk)</option>
-            <option value="toggle">Toggle</option>
-          </select>
+            onChange={(v) => update((c) => void (c.hotkey.mode = v as "hold" | "toggle"))}
+            options={[
+              { value: "hold", label: "Hold (push-to-talk)" },
+              { value: "toggle", label: "Toggle" },
+            ]}
+          />
         </Row>
       </Section>
 
       <Section title="Language">
         <Row label="Spoken language" hint="Auto-detect works well; forcing a language is faster">
-          <select
-            className={selectCls}
+          <Select
+            className="w-44"
             value={config.language}
-            onChange={(e) => update((c) => void (c.language = e.target.value))}
-          >
-            {LANGUAGES.map(([id, label]) => (
-              <option key={id} value={id}>
-                {label}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => update((c) => void (c.language = v))}
+            options={LANGUAGES.map(([id, label]) => ({ value: id, label }))}
+          />
         </Row>
       </Section>
 
