@@ -3,6 +3,7 @@
 Fully local push-to-talk dictation app: Tauri 2 (Rust core + React/TS UI), STT via Parakeet/whisper.cpp, LLM cleanup via Ollama. No cloud, no telemetry.
 
 ## Source of truth
+- `.claude/skills/project-knowledge/` — the project knowledge base. `tree.md` = auto-generated repo map (**read first to locate code instead of globbing**); `flows.md` = business flows + latency-triage table (**read first for any bug/latency/behavior question, then open only the file it points at**). See its SKILL.md for maintenance rules.
 - `docs/ENGINEERING_DESIGN.md` — architecture, pipeline, model choices (§ numbers referenced everywhere).
 - `docs/FABLE5_PROMPT_PLAN.md` — the 30-prompt incremental build plan. Work proceeds prompt by prompt, in order. Check README "Status" for the current prompt.
 
