@@ -1,13 +1,22 @@
 use std::path::Path;
 
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+use whisper_rs::{
+    FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState,
+};
 
 use crate::{SttEngine, SttError, TranscribeOpts, Transcript};
 
 /// whisper.cpp backend. CPU-only for now; GPU feature flags land with the
 /// performance pass (design doc §11) so early phases stay easy to build.
 pub struct WhisperEngine {
-    context: WhisperContext,
+    /// Decode state (KV cache + compute buffers, ~100 MB for base) is
+    /// allocated once and reused for every decode. Allocating it per call
+    /// churned that much memory several times a second across the partial /
+    /// chunk / tail decoders, which on a RAM-starved machine evicted the
+    /// model weights between decodes and turned every pass into a page-fault
+    /// storm (observed as 20 s+ finals on a 7 GB laptop). The state keeps
+    /// the model context alive via its internal Arc.
+    state: WhisperState,
     model_name: String,
 }
 
@@ -21,14 +30,15 @@ impl WhisperEngine {
             params,
         )
         .map_err(|e| SttError::ModelLoad(e.to_string()))?;
+        let state = context
+            .create_state()
+            .map_err(|e| SttError::ModelLoad(e.to_string()))?;
         let model_name = model_path
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "unknown".into());
-        Ok(Self {
-            context,
-            model_name,
-        })
+        drop(context); // state's internal Arc keeps the model alive
+        Ok(Self { state, model_name })
     }
 }
 
@@ -61,16 +71,12 @@ impl SttEngine for WhisperEngine {
             params.set_initial_prompt(prompt);
         }
 
-        let mut state = self
-            .context
-            .create_state()
-            .map_err(|e| SttError::Inference(e.to_string()))?;
-        state
+        self.state
             .full(params, audio)
             .map_err(|e| SttError::Inference(e.to_string()))?;
 
         let mut text = String::new();
-        for segment in state.as_iter() {
+        for segment in self.state.as_iter() {
             let piece = segment
                 .to_str_lossy()
                 .map_err(|e| SttError::Inference(e.to_string()))?;
@@ -85,6 +91,19 @@ impl SttEngine for WhisperEngine {
 
     fn describe(&self) -> String {
         format!("whisper.cpp {} (CPU)", self.model_name)
+    }
+
+    /// A real decode over half a second of silence pages in the weights and
+    /// initializes mel/compute scratch, so the first dictation is not cold.
+    fn warm_up(&mut self) {
+        let silence = vec![0.0f32; 8_000]; // 0.5 s at 16 kHz
+        let opts = TranscribeOpts {
+            threads: Some(2),
+            ..TranscribeOpts::default()
+        };
+        if let Err(e) = self.transcribe(&silence, &opts) {
+            tracing::debug!(error = %e, "warm-up decode failed");
+        }
     }
 }
 

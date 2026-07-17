@@ -1,64 +1,248 @@
 # OpenFlow
 
-A fully local, open-source **Wispr Flow alternative**: push-to-talk voice dictation into any application, with on-device speech recognition and local LLM cleanup via Ollama. No cloud, no telemetry, no subscription.
+A fully local, open-source **Wispr Flow alternative**: push-to-talk voice dictation into any application, with on-device speech recognition and optional local LLM cleanup via Ollama. No cloud, no telemetry, no account, no subscription.
 
 Hold a hotkey, speak, release — polished text appears at your cursor in whatever app is focused.
 
 ![status](https://img.shields.io/badge/status-all%20phases%20implemented-success)
+![platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
+![license](https://img.shields.io/badge/license-MIT-green)
 
-## What it does
+---
+
+## Table of contents
+
+1. [Features](#features)
+2. [How it works (architecture)](#how-it-works-architecture)
+3. [System requirements](#system-requirements)
+4. [Installation — Option A: prebuilt installer (recommended)](#installation--option-a-prebuilt-installer-recommended)
+5. [Installation — Option B: build from source](#installation--option-b-build-from-source)
+6. [First-run setup](#first-run-setup)
+7. [Optional: AI cleanup with Ollama](#optional-ai-cleanup-with-ollama)
+8. [Using OpenFlow](#using-openflow)
+9. [Configuration reference](#configuration-reference)
+10. [Troubleshooting](#troubleshooting)
+11. [Development](#development)
+12. [Privacy](#privacy)
+13. [License](#license)
+
+---
+
+## Features
 
 - **Global push-to-talk** — hold Right Ctrl (configurable; hold or toggle mode) to dictate into any app.
-- **On-device speech-to-text** — whisper.cpp locally; live streaming partials in a floating HUD.
-- **Local AI cleanup (Ollama)** — removes filler words ("um", "uh"), fixes punctuation, applies self-corrections ("no wait, Monday"), formats paragraphs and lists. Falls back to the raw transcript whenever the model misbehaves or Ollama is down.
-- **Context awareness** — detects the focused app (Slack, Gmail, VS Code, terminal, docs) and adapts tone; reads nearby text to spell names right; aborts if you switch windows mid-dictation.
-- **Coding mode** — "get user by id camel case" → `getUserById`; "src slash main dot rs" → `src/main.rs`; "git commit dash m" → `git commit -m`. Types (never pastes) into terminals and never sends a newline.
-- **Voice commands** — select text and say "make it shorter", "rewrite professionally", "translate to German", "turn this into an email", "summarize", "fix grammar", or "explain this" (answer shown in a popover). Add your own.
+- **On-device speech-to-text** — whisper.cpp runs locally; live streaming captions in a floating HUD while you speak; long dictations finalize in flat time thanks to streaming chunk finalization.
+- **Instant deterministic cleanup (no LLM required)** — repeated words/stutters collapsed ("the the" → "the"), fillers removed ("um", "uh"), sentences capitalized, terminal punctuation added with question detection ("what time is it" → "What time is it?"). Runs in microseconds on every dictation.
+- **Optional local AI cleanup (Ollama)** — deeper rewrites: self-corrections ("no wait, Monday"), paragraph/list formatting, tone matching. Guarded — falls back to the raw transcript whenever the model misbehaves or Ollama is down.
+- **Context awareness** — detects the focused app (Slack, Gmail, VS Code, terminal, docs) and adapts tone; reads nearby text to spell names right; aborts injection if you switch windows mid-dictation.
+- **Coding mode** — "get user by id camel case" → `getUserById`; "src slash main dot rs" → `src/main.rs`. Types (never pastes) into terminals and never sends a newline.
+- **Voice commands** — select text and say "make it shorter", "rewrite professionally", "translate to German", "summarize", "fix grammar", or "explain this" (answer in a popover). Add your own.
 - **Personal dictionary** — teach it your jargon and names; corrects mis-hearings and biases the recognizer.
-- **Snippets** — say "my address" → your address expands.
-- **History & latency monitor** — every dictation logged locally with a per-stage timing waterfall.
-- **100% local** — the only network calls are to your local Ollama and (once) model downloads.
+- **Snippets** — say "my address" → your full address expands.
+- **History & latency monitor** — every dictation logged locally (SQLite) with a per-stage timing waterfall.
+- **100% local** — the only network calls are to your local Ollama and one-time model downloads.
 
-## Architecture
+## How it works (architecture)
 
-Tauri 2 desktop app: a Rust core (the tray-resident daemon) plus a React/TypeScript settings window and a transparent HUD overlay.
+Tauri 2 desktop app: a Rust core (tray-resident daemon) plus a React/TypeScript settings window and a transparent HUD overlay.
 
 ```
-Mic → VAD → rolling buffer ──► streaming partials (HUD)
-                    │ (hotkey release)
+Mic → VAD → rolling buffer ──► streaming captions (HUD)
+                    │            + chunk finalization while you speak
+                    │ (hotkey release: only the last few seconds decode)
                     ▼
-        Whisper final pass → dictionary → coding grammar → snippets
+   Whisper final pass → dictionary → coding grammar / prose tidy → snippets
                     │
               command? ──yes──► LLM transform → replace selection / popover
                     │no
                     ▼
-        LLM cleanup (Ollama, guarded) → injection (clipboard paste / keystrokes)
+   LLM cleanup (Ollama, optional, guarded) → injection (clipboard paste / keystrokes)
                     ▼
              your focused application
 ```
 
-Crates: `core` (orchestrator state machine), `audio` (cpal + Silero VAD), `stt` (whisper.cpp), `llm` (Ollama client + cleanup + commands + guard), `postproc` (dictionary, snippets, casing), `context` (focus + UIA + profiles), `inject` (clipboard/keystroke), `hotkey` (low-level hook), `settings`, `store` (SQLite), `models` (downloads). Full design in [docs/ENGINEERING_DESIGN.md](docs/ENGINEERING_DESIGN.md); the incremental build plan in [docs/FABLE5_PROMPT_PLAN.md](docs/FABLE5_PROMPT_PLAN.md); progress in [.claude/PROGRESS.md](.claude/PROGRESS.md).
+Crates: `core` (orchestrator state machine), `audio` (cpal + Silero VAD), `stt` (whisper.cpp), `llm` (Ollama client + cleanup + commands + guard), `postproc` (tidy, dictionary, snippets, casing), `context` (focus + UIA + profiles), `inject` (clipboard/keystroke), `hotkey` (low-level hook), `settings`, `store` (SQLite), `models` (downloads). Full design in [docs/ENGINEERING_DESIGN.md](docs/ENGINEERING_DESIGN.md); build plan in [docs/FABLE5_PROMPT_PLAN.md](docs/FABLE5_PROMPT_PLAN.md); progress in [.claude/PROGRESS.md](.claude/PROGRESS.md).
 
-## Building & running (Windows)
+## System requirements
 
-Prereqs: **Rust** (stable, MSVC toolchain), **Node 22+**, **CMake** and **LLVM/libclang** (whisper.cpp builds via cmake + bindgen), and **[Ollama](https://ollama.com)** for AI cleanup.
+| | Minimum | Recommended |
+|---|---|---|
+| OS | Windows 10 64-bit | Windows 11 |
+| CPU | 4 cores | 8+ cores |
+| RAM | 8 GB (dictation only) | 16 GB (dictation + Ollama cleanup) |
+| Disk | ~500 MB (app + whisper-base + VAD) | +2 GB per Ollama model |
+| Other | A microphone; [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) (preinstalled on Win 10/11) | |
 
-```sh
-# One-time: pull the default local models
-ollama pull qwen3:4b-instruct
-ollama pull gemma3:12b
+> **Low-RAM machines (8 GB or less):** dictation works well, but keep LLM cleanup disabled (the default deterministic tidy still gives you clean text) and don't let Ollama autostart in the background — see [Troubleshooting](#troubleshooting).
 
-cd apps/desktop
-npm install
-npm run tauri dev      # run the app (dev)
-npm run tauri build    # produce an installer (NSIS .exe / .msi)
+macOS/Linux: the core crates are cross-platform and CI-built, but the hotkey/injection/context backends are Windows-only today; ports are planned behind the same traits.
+
+## Installation — Option A: prebuilt installer (recommended)
+
+Every push to `main` builds a signed-free NSIS installer on GitHub Actions.
+
+1. Open the repo's **Actions** tab → workflow **"Build Windows App"** → click the latest green run on `main`.
+2. Download the **`OpenFlow-Windows-Installer`** artifact (or `OpenFlow-Windows-Standalone` for a portable exe) and unzip it.
+   With the [GitHub CLI](https://cli.github.com/): `gh run download <run-id> -n OpenFlow-Windows-Installer`
+3. Run the setup exe. It installs per-user to `%LOCALAPPDATA%\OpenFlow` (no admin rights needed). Silent install: `OpenFlow_<version>_x64-setup.exe /S`
+4. Launch **OpenFlow** from the Start menu. It lives in the system tray (no main window by design).
+5. Continue with [First-run setup](#first-run-setup).
+
+To upgrade, install the newer version over the old one. To remove, use Windows **Add/Remove Programs → OpenFlow**.
+
+## Installation — Option B: build from source
+
+### Step 1 — install the toolchain
+
+Run these in **PowerShell** (winget comes with Windows 11; on Windows 10 install [App Installer](https://apps.microsoft.com/detail/9NBLGGH4NNS1)):
+
+```powershell
+# Rust (MSVC toolchain — the default on Windows)
+winget install Rustlang.Rustup
+rustup default stable-msvc
+
+# Visual Studio 2022 Build Tools with the C++ workload (MSVC linker, Windows SDK)
+winget install Microsoft.VisualStudio.2022.BuildTools --override "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --passive"
+
+# Node.js 22+ (frontend build)
+winget install OpenJS.NodeJS.LTS
+
+# CMake + LLVM (whisper.cpp builds via cmake; bindgen needs libclang)
+winget install Kitware.CMake
+winget install LLVM.LLVM
 ```
 
-From the repo root: `cargo test --workspace` runs the suite; `cargo clippy --workspace --all-targets -- -D warnings` lints.
+Open a **new** PowerShell window afterwards so `PATH` changes take effect. Verify:
 
-First launch downloads the speech model and Silero VAD automatically, then lives in the system tray. Open **Settings** from the tray to pick your mic, model, hotkey, and to manage your dictionary, snippets, and commands.
+```powershell
+rustc --version      # e.g. rustc 1.8x
+node --version       # v22+
+cmake --version
+clang --version
+```
 
-> **Note on scope:** the Windows implementation is complete. macOS and Linux backends (hotkey/injection/context) are stubbed behind the same traits and are the next port — the core, audio, STT, LLM, and UI are already cross-platform.
+> If `cargo build` later fails with a *libclang not found* error, point bindgen at LLVM explicitly by creating `.cargo/config.toml` in the repo root:
+>
+> ```toml
+> [env]
+> LIBCLANG_PATH = "C:\\Program Files\\LLVM\\bin"
+> ```
+
+### Step 2 — clone and build the frontend once
+
+```powershell
+git clone https://github.com/saisagarr1995/wisprflow-ai-clone.git
+cd wisprflow-ai-clone\apps\desktop
+npm install
+npm run build        # creates apps/desktop/dist — required before any cargo build
+```
+
+### Step 3 — build and run
+
+```powershell
+# Development (hot-reload UI + debug Rust core):
+npm run tauri dev
+
+# Release installer (NSIS .exe under target/release/bundle/):
+npm run tauri build
+```
+
+Build from **PowerShell, not Git Bash** — Git Bash can shadow the MSVC linker with coreutils `link` and fail with `link: extra operand`.
+
+> **Tip for 8 GB machines:** a full release build is memory-hungry. Close browsers/Ollama first, or limit parallelism: `$env:CARGO_BUILD_JOBS=2; npm run tauri build`. Alternatively just use the CI installer (Option A).
+
+### Step 4 — verify the workspace (optional, for contributors)
+
+```powershell
+cd ..\..            # repo root
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+## First-run setup
+
+1. **Launch OpenFlow.** On first start it automatically downloads the speech model (whisper-base, ~148 MB) and Silero VAD (~2 MB) to `%APPDATA%\openflow\models`, then sits in the system tray.
+2. **Open Settings** from the tray icon.
+3. **Microphone** — pick your input device under *Audio* (default: system default device).
+4. **Hotkey** — default is **hold Right Ctrl**. Press and *hold* it, speak, release. (A quick tap is deliberately ignored as a fumble — utterances under 300 ms are discarded.) Toggle mode is available if you prefer press-once-to-start.
+5. **Test it:** focus Notepad, hold Right Ctrl, say "this is a test of open flow", release. Text appears at the cursor and the floating HUD shows live captions while you speak.
+6. (Optional) Set up [AI cleanup](#optional-ai-cleanup-with-ollama), your dictionary, and snippets.
+
+## Optional: AI cleanup with Ollama
+
+Dictation is fully functional without this — the built-in deterministic tidy already removes stutters/fillers and fixes capitalization/punctuation. Enable Ollama cleanup for deeper rewrites (self-corrections, formatting, tone).
+
+1. Install Ollama: `winget install Ollama.Ollama` (or from [ollama.com](https://ollama.com)).
+2. Pull a small, fast model — on CPU-only machines stick to 1–3 B parameters:
+   ```powershell
+   ollama pull llama3.2:1b     # fastest, ~1.2 GB
+   # or: ollama pull llama3.2:3b   # better quality, needs more RAM/CPU
+   ```
+3. In OpenFlow **Settings → Models & AI**: enable cleanup and select the model. The status card turns green when Ollama is reachable at `http://localhost:11434`.
+4. If Ollama is down or slow, dictation still works — cleanup silently falls back to the tidied raw transcript.
+
+> **8 GB-RAM warning:** Ollama's tray app registers itself to autostart and holds RAM even when idle, which can starve the speech decoder. If you don't use cleanup, remove the autostart:
+> ```powershell
+> Remove-ItemProperty -Path HKCU:\Software\Microsoft\Windows\CurrentVersion\Run -Name Ollama
+> ```
+
+## Using OpenFlow
+
+| Action | How |
+|---|---|
+| Dictate | Hold **Right Ctrl**, speak, release |
+| Live captions | Appear in the floating HUD pill while recording |
+| Voice command | Select text first, then dictate e.g. *"make it shorter"* |
+| Ask a question | Dictate *"explain this"* with text selected — answer opens in a popover |
+| Snippet | Dictate its trigger phrase, e.g. *"my address"* |
+| Coding mode | Automatic in IDEs/terminals: *"get user by id camel case"* → `getUserById` |
+| History / latency | Settings → History / Latency pages |
+
+## Configuration reference
+
+Config lives at `%APPDATA%\openflow\config.json` — edit through the Settings UI. (If you must edit by hand, save as UTF-8 **without BOM**; a BOM makes the file unreadable and the app resets it to defaults.)
+
+| Setting | Default | Notes |
+|---|---|---|
+| `hotkey.chord` / `mode` | `RCtrl` / `hold` | `toggle` available |
+| `stt.model_id` | `whisper-base` | `whisper-tiny` is faster/less accurate; models auto-download |
+| `language` | `auto` | Force e.g. `en` for a small speed win |
+| `llm.enabled` | `false` | Ollama cleanup on/off |
+| `llm.cleanup_model` | `llama3.2:1b` | Any local Ollama model |
+| `audio.preroll_ms` | `250` | Audio kept from before the keypress |
+| `injection.strategy` | `auto` | Clipboard-paste, keystrokes for terminals |
+
+Data locations: models `%APPDATA%\openflow\models`, history DB `%APPDATA%\openflow\openflow.db`, logs to stdout (`RUST_LOG=openflow_core=debug` for verbose).
+
+## Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| Nothing happens on Right Ctrl | App not running (check tray / `Get-Process openflow-desktop`); or you *tapped* instead of *held* — sub-300 ms utterances are discarded |
+| Everything is slow (10–20 s finals) | RAM starvation. Check free RAM; quit Ollama's tray app and remove its autostart (command above); close heavy browsers. Dictation needs ~500 MB free |
+| First dictation after launch is slower | Model warm-up; engines are pre-warmed at startup, but a cold disk cache can still add a second once |
+| Text lands in the wrong app | It doesn't — injection is aborted if focus changed mid-dictation; re-focus and dictate again |
+| Cleanup returns raw text | Ollama down/unreachable → check Settings status card; the guard also rejects LLM output that invents content |
+| `link: extra operand` build error | Building from Git Bash — use PowerShell |
+| Build fails: libclang / cmake missing | Install LLVM + CMake (Step 1) and/or set `LIBCLANG_PATH` |
+| `generate_context!` error on cargo build | Run `npm run build` in `apps/desktop` first (dist must exist) |
+| Config reset to defaults on start | Hand-edited config saved with a UTF-8 BOM — recreate via Settings UI |
+| HUD never reacts | Reinstall — a build without `capabilities/default.json` denies HUD events |
+
+Per-dictation stage timings (audio/STT/LLM/inject) are recorded in **Settings → Latency** — check them first; they name the slow stage.
+
+## Development
+
+```powershell
+cargo test --workspace                                   # full test suite (headless; hardware is faked)
+cargo clippy --workspace --all-targets -- -D warnings    # lint gate
+cd apps\desktop; npm run tauri dev                       # run with hot reload
+```
+
+- `apps/desktop` is a thin Tauri shell (tray, windows, IPC) — **all logic lives in `crates/*`**.
+- Hardware/platform code sits behind traits with `Fake*` implementations so tests run headless in CI.
+- The orchestrator (`crates/core`) is a single-threaded mpsc event loop — the only owner of session state.
+- PRs must pass `cargo test`, clippy with `-D warnings`, and `cargo fmt --check`.
 
 ## Privacy
 

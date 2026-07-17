@@ -48,4 +48,8 @@ pub trait SttEngine: Send {
     /// Human-readable backend description ("whisper.cpp tiny (CPU)") for
     /// logs and the latency monitor.
     fn describe(&self) -> String;
+
+    /// Touch weights/buffers so the first real decode is not cold. Called
+    /// once at startup, off the latency path; default is a no-op.
+    fn warm_up(&mut self) {}
 }
