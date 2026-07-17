@@ -96,11 +96,14 @@ impl PartialWorker {
                             Ok(t) => {
                                 // Auto-detect runs an extra pass per decode;
                                 // pin the first detection for the rest of the
-                                // session so later ticks skip it.
-                                if language.is_none() {
-                                    *language = t.language.clone();
-                                }
+                                // session so later ticks skip it. Only from
+                                // ticks that heard actual speech — detection
+                                // on silence returns an arbitrary language at
+                                // ~1% confidence.
                                 if !t.text.trim().is_empty() {
+                                    if language.is_none() {
+                                        *language = t.language.clone();
+                                    }
                                     on_partial(t.text);
                                 }
                             }

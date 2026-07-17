@@ -5,7 +5,7 @@ export interface Config {
   language: string;
   hotkey: { chord: string; mode: "hold" | "toggle" | "hands_free" };
   audio: { input_device: string | null; preroll_ms: number };
-  stt: { engine: "auto" | "parakeet" | "whisper"; model_id: string };
+  stt: { engine: "auto" | "parakeet" | "whisper"; model_id: string; gpu: boolean };
   llm: {
     enabled: boolean;
     base_url: string;

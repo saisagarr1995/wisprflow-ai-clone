@@ -236,12 +236,20 @@ fn bootstrap_pipeline(
             engine
         })
     };
-    let stt_factory: openflow_core::SttFactory = Box::new(|model_id: &str| {
-        let path = openflow_models::ensure(model_id, |_| {}).map_err(|e| e.to_string())?;
-        openflow_stt::WhisperEngine::from_file(&path)
-            .map(|e| Box::new(e) as Box<dyn openflow_stt::SttEngine>)
-            .map_err(|e| e.to_string())
-    });
+    let stt_factory: openflow_core::SttFactory = {
+        let use_gpu = config.stt.gpu;
+        Box::new(move |model_id: &str| {
+            let path = openflow_models::ensure(model_id, |_| {}).map_err(|e| e.to_string())?;
+            let engine = if use_gpu {
+                openflow_stt::WhisperEngine::from_file_gpu(&path)
+            } else {
+                openflow_stt::WhisperEngine::from_file(&path)
+            };
+            engine
+                .map(|e| Box::new(e) as Box<dyn openflow_stt::SttEngine>)
+                .map_err(|e| e.to_string())
+        })
+    };
 
     // Shared with the streaming finalizer inside the orchestrator, which
     // commits chunks of the utterance while the user is still speaking.
@@ -283,7 +291,7 @@ fn bootstrap_pipeline(
     // (Tamil/Telugu/auto) instead of force-decoding English.
     let partials = match openflow_models::ensure("whisper-tiny-multi", |_| {})
         .map_err(|e| e.to_string())
-        .and_then(|p| openflow_stt::WhisperEngine::from_file_cpu(&p).map_err(|e| e.to_string()))
+        .and_then(|p| openflow_stt::WhisperEngine::from_file(&p).map_err(|e| e.to_string()))
     {
         Ok(mut engine) => {
             openflow_stt::SttEngine::warm_up(&mut engine);

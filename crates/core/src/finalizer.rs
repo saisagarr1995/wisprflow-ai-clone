@@ -140,15 +140,19 @@ impl StreamFinalizer {
                     let result = stt.lock().expect("stt lock").transcribe(&chunk, &opts);
                     match result {
                         Ok(t) => {
-                            // Pin the first auto-detected language so later
-                            // chunks — and the release-time tail decode —
-                            // skip their extra detection pass.
-                            if s.opts.language.is_none() {
-                                s.opts.language = t.language.clone();
-                            }
-                            s.committed.language = s.opts.language.clone();
                             let text = t.text.trim();
                             if !text.is_empty() {
+                                // Pin the first auto-detected language so
+                                // later chunks — and the release-time tail
+                                // decode — skip their extra detection pass.
+                                // Only from chunks with actual speech: on
+                                // silence, detection returns an arbitrary
+                                // language at ~1% confidence, and pinning
+                                // that would poison the whole session.
+                                if s.opts.language.is_none() {
+                                    s.opts.language = t.language.clone();
+                                    s.committed.language = t.language.clone();
+                                }
                                 if !s.committed.text.is_empty() {
                                     s.committed.text.push(' ');
                                 }

@@ -24,16 +24,18 @@ pub struct WhisperEngine {
 }
 
 impl WhisperEngine {
-    /// Final-pass engine: uses the GPU when compiled with `gpu-vulkan`.
+    /// CPU engine — the default. Even in `gpu-vulkan` builds the GPU is
+    /// opt-in per config: iGPUs without matrix cores decode whisper slower
+    /// than the CPU, so shipping GPU-on-by-default would regress laptops.
     pub fn from_file(model_path: &Path) -> Result<Self, SttError> {
-        Self::new(model_path, cfg!(feature = "gpu-vulkan"))
+        Self::new(model_path, false)
     }
 
-    /// CPU-pinned engine for live captions: the small model is fast enough
-    /// on 2 cores, and keeping it off the GPU means partial decodes never
-    /// contend with the latency-critical final/chunk passes.
-    pub fn from_file_cpu(model_path: &Path) -> Result<Self, SttError> {
-        Self::new(model_path, false)
+    /// GPU-offloaded engine (config `stt.gpu`). Only effective in builds
+    /// with the `gpu-vulkan` feature; whisper.cpp falls back to CPU (with a
+    /// "no GPU found" log) when no usable device exists.
+    pub fn from_file_gpu(model_path: &Path) -> Result<Self, SttError> {
+        Self::new(model_path, true)
     }
 
     fn new(model_path: &Path, use_gpu: bool) -> Result<Self, SttError> {
@@ -57,7 +59,7 @@ impl WhisperEngine {
         Ok(Self {
             state,
             model_name,
-            gpu: use_gpu,
+            gpu: use_gpu && cfg!(feature = "gpu-vulkan"),
         })
     }
 }
