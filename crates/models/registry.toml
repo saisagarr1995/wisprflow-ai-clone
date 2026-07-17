@@ -22,6 +22,20 @@ license = "MIT"
 languages = "en"
 
 [[model]]
+id = "whisper-base-q5"
+kind = "stt"
+file = "ggml-base.en-q5_1.bin"
+url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en-q5_1.bin"
+sha256 = "4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f"
+size_bytes = 59721011
+license = "MIT"
+languages = "en"
+# Quantized (5-bit) base.en: ~60% smaller weights than whisper-base with
+# near-identical accuracy. The right default on low-RAM machines — less
+# page-cache pressure is the difference between instant and 20 s decodes
+# there (Meetily ships quantized models for the same reason).
+
+[[model]]
 id = "silero-vad-v5"
 kind = "vad"
 file = "silero_vad.onnx"
