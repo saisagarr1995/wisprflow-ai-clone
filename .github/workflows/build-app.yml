@@ -17,6 +17,10 @@ jobs:
       # into a short root instead (error C1083 "Cannot open compiler
       # generated file: ''" otherwise).
       CARGO_TARGET_DIR: C:\ct
+      # Portable CPU baseline (see the file for why): without it the binary
+      # inherits the runner CPU's instruction set and can crash user
+      # machines with 0xc000001d. CMake ≥3.21 reads this env var directly.
+      CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}\ci\ggml-cpu-baseline.cmake
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
