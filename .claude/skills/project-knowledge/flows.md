@@ -58,6 +58,7 @@ Per-stage timings are RECORDED for every dictation: `DictationTiming {audio_ms, 
 | `stt_ms` dominates and grows with utterance length | StreamFinalizer not running (finalizer=None) or chunks not committing | `crates/core/src/finalizer.rs` (COMMIT_AFTER=5s, HOLDBACK=1.2s, CHUNK_THREADS=4, 400ms poll) |
 | `stt_ms` high but flat | Model too big for CPU / thread config | `crates/stt/src/whisper.rs`; model choice in Settings → Models |
 | Delay before recording even starts | hotkey hook or audio device init | `windows_hook.rs`, `crates/audio/src/engine.rs` |
+| Whole SYSTEM sluggish while speaking (or thermal shutdown) | decode threads oversubscribing the CPU — check the "decode budget" startup log line matches the machine tier | `crates/stt/src/perf.rs` |
 | Whole app frozen | orchestrator loop blocked (it is single-threaded) | `orchestrator.rs` — anything slow inside `finish_recording` blocks next dictation |
 | Injection lands in wrong app / nothing appears | focus-abort triggered or injector failed | orchestrator.rs focus re-check; `crates/inject/src/win_*.rs` |
 | Ollama down entirely | 3s connect timeout → falls back to raw text (still works, just no cleanup) | `ollama.rs:38` |
@@ -107,9 +108,8 @@ Settings → Models page → `download_model` / `list_models` IPC → `openflow-
 |---|---|---|
 | Hotkey | RCtrl (Hold mode; Toggle + HandsFree available) | settings schema |
 | Hands-free tick / silence hold / min peak | 200 ms / 2 s / 0.015 RMS | orchestrator.rs consts |
-| Partial re-decode interval | 350 ms | lib.rs:263 |
+| Decode budget (partial interval/threads, chunk threads, tail threads) | ADAPTIVE via `PerfProfile::get()` — Constrained (≤4 cores or ≤8 GB RAM): 600 ms / 2 / 3 / cores−2; Standard: 350 ms / 3 / 4 / cores−1 | `crates/stt/src/perf.rs` (Meetily-style tiers; logged at startup as "decode budget") |
 | Finalizer poll / commit threshold / holdback | 400 ms / 5 s / 1.2 s | finalizer.rs consts |
-| Chunk decode threads / final tail threads | 4 / all-but-one cores | finalizer.rs / whisper.rs |
 | Min utterance | 300 ms | orchestrator.rs:282 |
 | Ollama connect / request timeout | 3 s / 60 s | ollama.rs |
 | Trailing space after dictation | yes (not after identifiers) | orchestrator.rs:407 |

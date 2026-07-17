@@ -4,6 +4,26 @@ Newest first. One entry per working session: what was done, challenges hit,
 how they were solved, and what's next. Keep entries short — this file is
 read at the start of future sessions.
 
+## 2026-07-17 (later) — adaptive decode budget (same branch `feat/handsfree-pill-multilingual`)
+
+**Status: DONE, verified live.** User reported the app slow again + a laptop
+shutdown/restart, and asked to mine `meetily-main.zip`. Zip's one useful idea
+= hardware-tier adaptive whisper config (its `HardwareProfile` caps threads
+per tier). Root cause here: fixed thread counts tuned for a free machine —
+partials (3) + finalizer chunks (4) overlap while speaking = 7/8 cores busy,
+tail decode took 7; with ~0.8 GB free RAM that saturates the laptop
+(plausible thermal shutdown). Fix: new `crates/stt/src/perf.rs`
+`PerfProfile::get()` (OnceLock; cores via available_parallelism, RAM via
+minimal GlobalMemoryStatusEx FFI — no sysinfo dep). Constrained tier
+(≤4 cores or ≤8 GB RAM → THIS laptop): partials 2 thr @ 600 ms, chunks 3,
+tail cores−2; Standard keeps old values. Wired in whisper.rs default,
+partial.rs, finalizer.rs, lib.rs cadence. 5 unit tests; clippy clean.
+Verified: startup log prints `decode budget ... tier: Constrained`, full
+synthetic toggle-mode session cycled recording→processing→idle cleanly.
+Environment note: machine had 0.8 GB free RAM (Chrome + Antigravity IDE +
+Edge + Notion + Perplexity + Teams — user-side; Ollama autostart is GONE).
+Wispr pill screenshots the user re-shared are ALREADY implemented (Flow 7).
+
 ## 2026-07-17 — hands-free + clickable pill + Tamil/Telugu (branch `feat/handsfree-pill-multilingual`)
 
 **Status: IMPLEMENTED — awaiting user's on-device test + PR merge.**

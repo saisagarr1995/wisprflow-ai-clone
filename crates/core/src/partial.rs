@@ -89,7 +89,7 @@ impl PartialWorker {
                         // starve the final pass, the UI, or other apps.
                         let opts = TranscribeOpts {
                             language: language.clone(),
-                            threads: Some(3),
+                            threads: Some(openflow_stt::PerfProfile::get().partial_threads),
                             ..TranscribeOpts::default()
                         };
                         match stt.transcribe(&audio, &opts) {

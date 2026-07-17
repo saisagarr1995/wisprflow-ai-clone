@@ -5,9 +5,11 @@
 //! 16 kHz mono f32 audio (the `openflow-audio` contract).
 
 mod fake;
+mod perf;
 mod whisper;
 
 pub use fake::FakeStt;
+pub use perf::{PerfProfile, Tier};
 pub use whisper::WhisperEngine;
 
 #[derive(Debug, thiserror::Error)]
@@ -27,9 +29,9 @@ pub struct TranscribeOpts {
     /// (design doc §2 stage 4, §7). Whisper consumes this as the decoder's
     /// initial prompt; other engines map it to hotword lists.
     pub initial_prompt: Option<String>,
-    /// Decode threads. `None` = all cores minus one (fast finals that still
-    /// leave the UI a core); partial decodes pass a small number so live
-    /// captions never starve the rest of the system.
+    /// Decode threads. `None` = the tail-decode budget from `PerfProfile`
+    /// (hardware-adaptive); partial/chunk decodes pass their own budget so
+    /// concurrent passes never starve the rest of the system.
     pub threads: Option<i32>,
 }
 

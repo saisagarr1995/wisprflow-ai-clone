@@ -35,9 +35,9 @@ const HOLDBACK: u64 = SR * 12 / 10;
 /// The cut lands on the quietest 80 ms window inside the last second of the
 /// candidate chunk, so chunks end between words rather than through them.
 const CUT_SEARCH: u64 = SR;
-/// Chunk decodes share the machine with live captions and the foreground
-/// app; the release-time tail decode is the only pass that gets all cores.
-const CHUNK_THREADS: i32 = 4;
+// Chunk decodes share the machine with live captions and the foreground
+// app; their thread count comes from the hardware-adaptive PerfProfile so
+// overlapping passes never saturate a small laptop.
 
 struct Session {
     history: Arc<Mutex<RollingBuffer>>,
@@ -130,7 +130,7 @@ impl StreamFinalizer {
                     let opts = TranscribeOpts {
                         language: s.opts.language.clone(),
                         initial_prompt: prompt,
-                        threads: Some(CHUNK_THREADS),
+                        threads: Some(openflow_stt::PerfProfile::get().chunk_threads),
                     };
                     let result = stt.lock().expect("stt lock").transcribe(&chunk, &opts);
                     match result {

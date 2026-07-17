@@ -288,7 +288,11 @@ fn bootstrap_pipeline(
                 Box::new(move |text| {
                     let _ = partial_app.emit("partial", text);
                 }),
-                std::time::Duration::from_millis(350),
+                // Caption cadence adapts to the machine: constrained laptops
+                // re-decode less often so the system stays responsive.
+                std::time::Duration::from_millis(
+                    openflow_stt::PerfProfile::get().partial_interval_ms,
+                ),
             ))
         }
         Err(e) => {
