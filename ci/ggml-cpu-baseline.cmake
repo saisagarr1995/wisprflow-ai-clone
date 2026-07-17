@@ -8,6 +8,14 @@
 # release binaries.
 #
 # Injected via the CMAKE_TOOLCHAIN_FILE env var in .github/workflows.
+#
+# Compile the C/C++ with clang-cl, not MSVC's cl. The runners carry a
+# preview MSVC (v18) whose ggml output was 5-20x slower than local builds
+# and crashed silently mid-decode on user machines; upstream whisper.cpp /
+# llama.cpp ship their Windows release binaries built with clang for the
+# same reason.
+set(CMAKE_GENERATOR_TOOLSET "ClangCL" CACHE STRING "" FORCE)
+
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
 set(GGML_AVX2 ON CACHE BOOL "" FORCE)
 set(GGML_FMA ON CACHE BOOL "" FORCE)
