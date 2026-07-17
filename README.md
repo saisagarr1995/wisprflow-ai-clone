@@ -18,19 +18,22 @@ Hold a hotkey, speak, release — polished text appears at your cursor in whatev
 4. [Installation — Option A: prebuilt installer (recommended)](#installation--option-a-prebuilt-installer-recommended)
 5. [Installation — Option B: build from source](#installation--option-b-build-from-source)
 6. [First-run setup](#first-run-setup)
-7. [Optional: AI cleanup with Ollama](#optional-ai-cleanup-with-ollama)
-8. [Using OpenFlow](#using-openflow)
-9. [Configuration reference](#configuration-reference)
-10. [Troubleshooting](#troubleshooting)
-11. [Development](#development)
-12. [Privacy](#privacy)
-13. [License](#license)
+7. [Dictating in Tamil, Telugu, and other languages](#dictating-in-tamil-telugu-and-other-languages)
+8. [Optional: AI cleanup with Ollama](#optional-ai-cleanup-with-ollama)
+9. [Using OpenFlow](#using-openflow)
+10. [Configuration reference](#configuration-reference)
+11. [Troubleshooting](#troubleshooting)
+12. [Development](#development)
+13. [Privacy](#privacy)
+14. [License](#license)
 
 ---
 
 ## Features
 
-- **Global push-to-talk** — hold Right Ctrl (configurable; hold or toggle mode) to dictate into any app.
+- **Global push-to-talk** — hold a hotkey (e.g. **Ctrl + Win** or Right Ctrl) to dictate into any app. Three modes: **Hold** (push-to-talk), **Toggle** (press to start/stop), and **Hands-free** (press once; it stops by itself when you go quiet).
+- **Clickable floating pill** — hover the little bar at the bottom of the screen: *"Click or hold Ctrl + Win to start dictating"*. Click it to start; while recording, **✕** cancels and the red **stop** button finishes and pastes — no keyboard needed.
+- **Languages** — English plus Tamil, Telugu, Hindi and ~95 more via multilingual Whisper models, with automatic language detection.
 - **On-device speech-to-text** — whisper.cpp runs locally; live streaming captions in a floating HUD while you speak; long dictations finalize in flat time thanks to streaming chunk finalization.
 - **Instant deterministic cleanup (no LLM required)** — repeated words/stutters collapsed ("the the" → "the"), fillers removed ("um", "uh"), sentences capitalized, terminal punctuation added with question detection ("what time is it" → "What time is it?"). Runs in microseconds on every dictation.
 - **Optional local AI cleanup (Ollama)** — deeper rewrites: self-corrections ("no wait, Monday"), paragraph/list formatting, tone matching. Guarded — falls back to the raw transcript whenever the model misbehaves or Ollama is down.
@@ -164,9 +167,22 @@ cargo clippy --workspace --all-targets -- -D warnings
 1. **Launch OpenFlow.** On first start it automatically downloads the speech model (whisper-base, ~148 MB) and Silero VAD (~2 MB) to `%APPDATA%\openflow\models`, then sits in the system tray.
 2. **Open Settings** from the tray icon.
 3. **Microphone** — pick your input device under *Audio* (default: system default device).
-4. **Hotkey** — default is **hold Right Ctrl**. Press and *hold* it, speak, release. (A quick tap is deliberately ignored as a fumble — utterances under 300 ms are discarded.) Toggle mode is available if you prefer press-once-to-start.
+4. **Hotkey** — default is **hold Right Ctrl** (pick **Ctrl+Win** or others from the presets). Press and *hold* it, speak, release. (A quick tap is deliberately ignored as a fumble — utterances under 300 ms are discarded.) Prefer no keyboard? Choose **Toggle** or **Hands-free** mode in Settings → General, or simply **click the floating pill** at the bottom of the screen to start and use its ✕ / stop buttons to cancel or finish.
 5. **Test it:** focus Notepad, hold Right Ctrl, say "this is a test of open flow", release. Text appears at the cursor and the floating HUD shows live captions while you speak.
 6. (Optional) Set up [AI cleanup](#optional-ai-cleanup-with-ollama), your dictionary, and snippets.
+
+## Dictating in Tamil, Telugu, and other languages
+
+The default `whisper-base` model is **English-only**. For any other language (or auto-detection across languages) you need a **multilingual** model — three are built in:
+
+1. Open **Settings → Models & AI** and download one:
+   - `whisper-small-multi` (~490 MB) — **recommended for Tamil/Telugu**; noticeably better accuracy for Indian languages.
+   - `whisper-base-multi` (~148 MB) — faster, okay accuracy.
+2. Still in **Models & AI**, select it as the active speech model.
+3. In **Settings → General → Language**, pick **Tamil**, **Telugu**, or leave **Auto-detect** (auto works across languages; forcing one language is a bit faster and more reliable).
+4. Dictate as usual — captions and the final text come out in the spoken language and are typed into the focused app.
+
+> Tips: on slower machines `whisper-small-multi` takes longer per dictation than base — try both. Keep **AI cleanup off** for non-English text unless your Ollama model handles that language well; the built-in deterministic tidy is script-safe.
 
 ## Optional: AI cleanup with Ollama
 
@@ -190,7 +206,9 @@ Dictation is fully functional without this — the built-in deterministic tidy a
 
 | Action | How |
 |---|---|
-| Dictate | Hold **Right Ctrl**, speak, release |
+| Dictate (keyboard) | Hold your hotkey (e.g. **Ctrl + Win**), speak, release |
+| Dictate (mouse) | Click the little pill at the bottom of the screen; while recording click **✕** to cancel or the red **stop** to finish and paste |
+| Hands-free | Settings → General → Mode → **Hands-free**: press the hotkey (or click the pill) once, speak, and just stop talking — it finishes on its own after ~2 s of silence |
 | Live captions | Appear in the floating HUD pill while recording |
 | Voice command | Select text first, then dictate e.g. *"make it shorter"* |
 | Ask a question | Dictate *"explain this"* with text selected — answer opens in a popover |
@@ -204,9 +222,9 @@ Config lives at `%APPDATA%\openflow\config.json` — edit through the Settings U
 
 | Setting | Default | Notes |
 |---|---|---|
-| `hotkey.chord` / `mode` | `RCtrl` / `hold` | `toggle` available |
-| `stt.model_id` | `whisper-base` | `whisper-tiny` is faster/less accurate; models auto-download |
-| `language` | `auto` | Force e.g. `en` for a small speed win |
+| `hotkey.chord` / `mode` | `RCtrl` / `hold` | Presets incl. `Ctrl+Win`; modes: `hold`, `toggle`, `hands_free` (auto-stops ~2 s after you stop talking) |
+| `stt.model_id` | `whisper-base` | English-only; use `whisper-small-multi` / `whisper-base-multi` for Tamil/Telugu/auto-detect |
+| `language` | `auto` | Or force `en`, `ta`, `te`, `hi`, … (a bit faster than auto) |
 | `llm.enabled` | `false` | Ollama cleanup on/off |
 | `llm.cleanup_model` | `llama3.2:1b` | Any local Ollama model |
 | `audio.preroll_ms` | `250` | Audio kept from before the keypress |

@@ -4,6 +4,64 @@ Newest first. One entry per working session: what was done, challenges hit,
 how they were solved, and what's next. Keep entries short — this file is
 read at the start of future sessions.
 
+## 2026-07-17 — hands-free + clickable pill + Tamil/Telugu (branch `feat/handsfree-pill-multilingual`)
+
+**Status: IMPLEMENTED — awaiting user's on-device test + PR merge.**
+(Branch is off `perf/resident-state-rule-tidy`; PR #11 still unmerged at
+plan time, so this PR's diff shows both branches until #11 merges.)
+
+User asked for (with Wispr Flow screenshots as reference):
+hands-free mode; Tamil + Telugu with auto-detect; clickable HUD pill
+(idle: "Click or hold Ctrl + Win to start dictating" → click starts; while
+recording: X on the left cancels, red stop on the right finishes-and-pastes);
+"Mode" in Settings → General reportedly not working; README polish; no
+laptop hangs; full validation.
+
+Root causes found up front:
+- Tamil/Telugu/auto-detect **cannot work today**: registry only has
+  English-only `ggml-*.en.bin` models, and `whisper.rs` never passes
+  `language="auto"` (None → whisper defaults to en). Partials engine is
+  tiny.en, hard-coded.
+- HUD window is permanently click-through (`set_ignore_cursor_events(true)`);
+  orchestrator has no cancel event and no way to start/stop from the UI.
+- No hands-free mode; only Hold/Toggle.
+- Mode plumbing (UI → set_config → watch channel → ConfigChanged →
+  apply_config → on_hotkey_pressed) reads correct; needs runtime repro —
+  user may be running the OLD installed build (PR #11 unmerged).
+
+Plan / checklist:
+- [x] Multilingual STT: `whisper-tiny-multi`/`-base-multi`/`-small-multi` in
+      registry.toml (sha256 from HF LFS pointers); `whisper.rs` passes
+      "auto" to whisper.cpp when language is None (unset = silent English —
+      that was the bug) and reports the detected language; partials use
+      multilingual tiny + inherit session language; partials/finalizer pin
+      the first auto-detected language per session (detection costs an
+      extra pass per decode); General.tsx adds ta/te + multilingual hint.
+- [x] Core: `SessionEvent::{HudStart,HudFinish,HudCancel}`, `cancel_recording`,
+      `HotkeyMode::HandsFree` (200 ms recv_timeout tick, level-based
+      trailing-silence endpointing: 2 s hold, peak-relative threshold,
+      0.015 min RMS peak). Tests: runtime mode-switch regression,
+      hands-free auto-stop (realtime-paced fake source — a CPU-speed flood
+      exhausts the noise before the session starts), hud start/finish/cancel,
+      event-storm test extended to the new events. 18 core tests green.
+- [x] Shell/HUD: orchestrator handle in AppState; `hud_start/finish/cancel` +
+      `hud_zones` IPC; `start_hud_hit_testing` cursor poll (~30 Hz) toggles
+      ignore_cursor_events so only reported rects are clickable (WebView2
+      captures input even over transparent pixels — per-pixel alpha
+      hit-testing does NOT work); window stays WS_EX_NOACTIVATE so pill
+      clicks never steal focus from the injection target; `config` event
+      emitted on hot-reload for the pill's chord text; Ctrl+Win preset.
+- [x] Validate: cargo test --workspace green, clippy -D warnings clean,
+      fmt clean, tsc + vite build clean, debug exe built, smoke-launched:
+      "pipeline ready", synthetic RCtrl dictation end-to-end OK.
+- [x] Mode bug: full chain re-verified + regression test; could not repro in
+      current code — likely the user was on the OLD installed build
+      (%LOCALAPPDATA%\OpenFlow, pre-PR-11). Live toggle-mode test via
+      config.json hot-edit + synthetic keys done this session.
+- [x] Docs: README (pill, hands-free, Tamil/Telugu step-by-step, config
+      table), flows.md (Flow 1 modes/HUD events, Flow 3b languages, HUD
+      zones), this entry.
+
 ## 2026-07-17 — 20s latency (round 2) + rule-based tidy (branch `perf/resident-state-rule-tidy`)
 
 **Problem:** User again reported >20 s from RCtrl release to text, despite the

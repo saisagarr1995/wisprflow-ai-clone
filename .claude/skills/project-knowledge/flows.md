@@ -7,7 +7,17 @@ changes** (new pipeline stage, changed timing knob, new event).
 
 ## Flow 1 — Push-to-talk dictation (the core flow)
 
-Hotkey (default RCtrl) held → speak → release → text appears in focused app.
+Hotkey (default RCtrl; presets incl. Ctrl+Win) held → speak → release → text
+appears in focused app. Three hotkey modes (config `hotkey.mode`, applied
+live via ConfigChanged): **hold** (release finishes), **toggle** (second
+press finishes), **hands_free** (auto-finishes after ~2 s of trailing
+silence — level-based endpointing in `Orchestrator::hands_free_should_stop`,
+driven by a 200 ms `recv_timeout` tick in `run`; a second press also stops).
+The HUD pill can drive the same session with the mouse:
+`SessionEvent::{HudStart,HudFinish,HudCancel}` posted from
+`commands.rs::hud_start/hud_finish/hud_cancel` (pill click / stop button /
+X button). Cancel (`cancel_recording`) discards everything — no STT, no
+injection.
 
 ```
 key event (any key on system)
@@ -59,7 +69,18 @@ Same capture as Flow 1 through STT; then `try_run_command` (orchestrator.rs:496)
 
 ## Flow 3 — Live captions (partials)
 
-`PartialWorker` (crates/core/src/partial.rs): own thread + own SMALL stt engine, re-decodes session-so-far every **350 ms** (lib.rs:263), capped at 3 threads. Emits to HUD (Hud.tsx) only — nothing downstream consumes partials; final pass is authoritative.
+`PartialWorker` (crates/core/src/partial.rs): own thread + own SMALL stt engine (**whisper-tiny-multi**, multilingual), re-decodes a sliding 5 s window every **350 ms**, capped at 3 threads. Receives the session language from the orchestrator; with auto-detect it pins the first detected language for the rest of the session (detection costs an extra pass per decode). Emits to HUD (Hud.tsx) only — nothing downstream consumes partials; final pass is authoritative.
+
+## Flow 3b — Languages (Tamil/Telugu/auto-detect)
+
+Config `language` ("auto" | "en" | "ta" | "te" | …) → `build_opts` →
+`TranscribeOpts.language` (None = auto). `whisper.rs` passes "auto" to
+whisper.cpp when None (an unset language silently decodes English — the old
+bug) and reports the detected language in `Transcript.language`. Non-English
+NEEDS a multilingual model (`whisper-*-multi` in registry.toml); the default
+`whisper-base` is ggml-base.EN. Finalizer chunks pin the first detected
+language like partials do. General.tsx shows a hint when a non-English
+language is picked.
 
 ## Flow 4 — Streaming finalizer (why long dictations finish fast)
 
@@ -75,7 +96,7 @@ Settings → Models page → `download_model` / `list_models` IPC → `openflow-
 
 ## Flow 7 — UI surfaces & events (shell, no logic)
 
-- HUD (Hud.tsx): status Idle/Recording/Processing + live partials + mic level (`get_level`, 66 ms poll in lib.rs:363–364).
+- HUD (Hud.tsx): status Idle/Recording/Processing + live partials + mic level (`get_level`, 66 ms poll in lib.rs). Clickable Wispr-style pill: idle handle hover-expands to "Click or hold <chord> to start dictating" (chord from `get_config` + live `config` event); recording pill has ✕ (cancel) and red stop (finish-and-paste) buttons. The window stays WS_EX_NOACTIVATE (clicks never steal focus, so injection still targets the user's app); selective click-through = frontend reports clickable rects via `hud_zones` IPC, `start_hud_hit_testing` (lib.rs) polls the cursor at ~30 Hz and toggles `set_ignore_cursor_events`.
 - Settings (Settings.tsx + pages/): all data via IPC commands in commands.rs — thin wrappers over crates.
 - Assistant (Assistant.tsx): popover answers from Flow 2.
 - Tray: status icon; opens Settings.
@@ -84,7 +105,8 @@ Settings → Models page → `download_model` / `list_models` IPC → `openflow-
 
 | Knob | Value | Where |
 |---|---|---|
-| Hotkey | RCtrl (Hold mode; Toggle available) | settings schema |
+| Hotkey | RCtrl (Hold mode; Toggle + HandsFree available) | settings schema |
+| Hands-free tick / silence hold / min peak | 200 ms / 2 s / 0.015 RMS | orchestrator.rs consts |
 | Partial re-decode interval | 350 ms | lib.rs:263 |
 | Finalizer poll / commit threshold / holdback | 400 ms / 5 s / 1.2 s | finalizer.rs consts |
 | Chunk decode threads / final tail threads | 4 / all-but-one cores | finalizer.rs / whisper.rs |
