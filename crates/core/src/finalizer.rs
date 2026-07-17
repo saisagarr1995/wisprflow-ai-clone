@@ -53,6 +53,9 @@ enum Cmd {
         opts: TranscribeOpts,
     },
     Finish(mpsc::Sender<Committed>),
+    /// Session cancelled: drop everything, no reply. Fire-and-forget so a
+    /// cancel NEVER blocks the orchestrator behind an in-flight decode.
+    Cancel,
     Shutdown,
 }
 
@@ -104,6 +107,10 @@ impl StreamFinalizer {
                         Some(Cmd::Finish(reply)) => {
                             let out = session.take().map(|s| s.committed).unwrap_or_default();
                             let _ = reply.send(out);
+                            continue;
+                        }
+                        Some(Cmd::Cancel) => {
+                            session = None;
                             continue;
                         }
                         Some(Cmd::Shutdown) => break,
@@ -179,6 +186,13 @@ impl StreamFinalizer {
             from,
             opts,
         });
+    }
+
+    /// Abandon the session without waiting: any in-flight chunk decode is
+    /// discarded when the worker gets to the command. Used by cancel, which
+    /// must return to the event loop immediately.
+    pub fn cancel(&self) {
+        let _ = self.tx.send(Cmd::Cancel);
     }
 
     /// Blocks until any in-flight chunk decode lands, then returns the
@@ -264,6 +278,22 @@ mod tests {
         worker.start(history, 0, TranscribeOpts::default());
         std::thread::sleep(Duration::from_millis(120));
 
+        let committed = worker.finish();
+        assert_eq!(committed.text, "");
+        assert_eq!(committed.until, 0);
+    }
+
+    #[test]
+    fn cancel_discards_session_without_reply() {
+        let history = Arc::new(Mutex::new(RollingBuffer::new(30 * SR as usize)));
+        history.lock().unwrap().push(&vec![0.4; 8 * SR as usize]);
+
+        let stt: SharedStt = Arc::new(Mutex::new(Box::new(FakeStt::with_responses(["chunk"]))));
+        let worker = StreamFinalizer::spawn(stt, Duration::from_millis(20), Duration::from_secs(5));
+        worker.start(history, 0, TranscribeOpts::default());
+        std::thread::sleep(Duration::from_millis(100));
+
+        worker.cancel(); // must not block
         let committed = worker.finish();
         assert_eq!(committed.text, "");
         assert_eq!(committed.until, 0);

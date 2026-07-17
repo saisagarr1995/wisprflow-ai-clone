@@ -17,7 +17,11 @@ The HUD pill can drive the same session with the mouse:
 `SessionEvent::{HudStart,HudFinish,HudCancel}` posted from
 `commands.rs::hud_start/hud_finish/hud_cancel` (pill click / stop button /
 X button). Cancel (`cancel_recording`) discards everything — no STT, no
-injection.
+injection — and is FIRE-AND-FORGET (`StreamFinalizer::cancel`): it must
+never wait on an in-flight chunk decode, which can queue behind the startup
+warm decode on the shared engine mutex (that wedge froze the pill for a
+minute on a slow build; warm_up now also uses the full tail thread budget,
+not 2 threads).
 
 ```
 key event (any key on system)

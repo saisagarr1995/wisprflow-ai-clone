@@ -327,7 +327,11 @@ impl Orchestrator {
             partials.stop();
         }
         if let Some(finalizer) = self.services.finalizer.as_ref() {
-            let _ = finalizer.finish(); // discard committed text
+            // Fire-and-forget: `finish()` would block behind any in-flight
+            // chunk decode (which itself can queue behind the startup warm
+            // decode on the shared engine mutex) — a cancel must make the
+            // pill respond instantly no matter what the decoders are doing.
+            finalizer.cancel();
         }
         let _ = self.services.audio.end_session();
         self.session_context = None;

@@ -132,10 +132,11 @@ impl SttEngine for WhisperEngine {
     /// initializes mel/compute scratch, so the first dictation is not cold.
     fn warm_up(&mut self) {
         let silence = vec![0.0f32; 8_000]; // 0.5 s at 16 kHz
-        let opts = TranscribeOpts {
-            threads: Some(2),
-            ..TranscribeOpts::default()
-        };
+        // Full tail budget: the warm decode holds the SHARED engine mutex,
+        // and a dictation started early queues its chunk decodes (and a
+        // blocking cancel) behind it — on 2 threads that wedged the app for
+        // the better part of a minute on slower builds.
+        let opts = TranscribeOpts::default();
         if let Err(e) = self.transcribe(&silence, &opts) {
             tracing::debug!(error = %e, "warm-up decode failed");
         }
