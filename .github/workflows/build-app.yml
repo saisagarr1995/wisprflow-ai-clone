@@ -11,6 +11,12 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
+    env:
+      # ggml's Vulkan shader generator nests CMake ExternalProject dirs deep
+      # enough to blow past MAX_PATH under target\release\build\… — build
+      # into a short root instead (error C1083 "Cannot open compiler
+      # generated file: ''" otherwise).
+      CARGO_TARGET_DIR: C:\ct
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -47,18 +53,17 @@ jobs:
         run: npm run tauri build -- --bundles nsis --features gpu-vulkan
         working-directory: apps/desktop
 
-      # This is a Cargo workspace, so build output lands in the workspace-root
-      # target/, not the crate's own directory.
+      # Build output lands under CARGO_TARGET_DIR (short path, see env above).
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
           name: OpenFlow-Windows-Installer
-          path: target/release/bundle/nsis/*.exe
+          path: C:\ct\release\bundle\nsis\*.exe
           if-no-files-found: error
 
       - name: Upload standalone exe
         uses: actions/upload-artifact@v4
         with:
           name: OpenFlow-Windows-Standalone
-          path: target/release/openflow-desktop.exe
+          path: C:\ct\release\openflow-desktop.exe
           if-no-files-found: error
