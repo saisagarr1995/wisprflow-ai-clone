@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { PageHeader } from "../ui";
 
@@ -28,6 +29,30 @@ export default function Latency() {
   const buf = useRef<Timing[]>([]);
 
   useEffect(() => {
+    // Seed with stored history so the page is populated the moment it
+    // opens; live "timing" events then append in real time.
+    interface HistoryEntry {
+      total_ms: number;
+      stt_ms: number;
+      llm_ms: number;
+      chars: number;
+    }
+    invoke<HistoryEntry[]>("history_list", { limit: 50 })
+      .then((rows) => {
+        if (buf.current.length > 0) return; // a live timing already arrived
+        buf.current = rows
+          .reverse() // newest-first in store → oldest-first in the chart
+          .map((r) => ({
+            audio_ms: 0,
+            stt_ms: r.stt_ms,
+            llm_ms: r.llm_ms,
+            inject_ms: Math.max(0, r.total_ms - r.stt_ms - r.llm_ms),
+            total_ms: r.total_ms,
+            chars: r.chars,
+          }));
+        setTimings([...buf.current]);
+      })
+      .catch(() => {});
     let unsub: (() => void) | undefined;
     listen<Timing>("timing", (e) => {
       buf.current = [...buf.current, e.payload].slice(-50);

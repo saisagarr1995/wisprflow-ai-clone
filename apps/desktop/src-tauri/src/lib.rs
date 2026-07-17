@@ -247,9 +247,14 @@ fn bootstrap_pipeline(
     // commits chunks of the utterance while the user is still speaking.
     let stt: openflow_core::SharedStt =
         std::sync::Arc::new(std::sync::Mutex::new(stt_factory(&config.stt.model_id)?));
+    tracing::info!(
+        engine = %stt.lock().expect("stt lock").describe(),
+        "final stt engine"
+    );
     let finalizer = Some(openflow_core::StreamFinalizer::spawn(
         stt.clone(),
         std::time::Duration::from_millis(400),
+        std::time::Duration::from_millis(openflow_stt::PerfProfile::get().commit_after_ms),
     ));
     // Warm the final engine off the latency path: the first dictation after
     // launch used to pay for lazy buffer init + cold weight pages. A real
@@ -278,7 +283,7 @@ fn bootstrap_pipeline(
     // (Tamil/Telugu/auto) instead of force-decoding English.
     let partials = match openflow_models::ensure("whisper-tiny-multi", |_| {})
         .map_err(|e| e.to_string())
-        .and_then(|p| openflow_stt::WhisperEngine::from_file(&p).map_err(|e| e.to_string()))
+        .and_then(|p| openflow_stt::WhisperEngine::from_file_cpu(&p).map_err(|e| e.to_string()))
     {
         Ok(mut engine) => {
             openflow_stt::SttEngine::warm_up(&mut engine);

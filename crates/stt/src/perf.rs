@@ -30,6 +30,11 @@ pub struct PerfProfile {
     pub chunk_threads: i32,
     /// Threads for the release-time tail decode (runs alone, latency-critical).
     pub tail_threads: i32,
+    /// Streaming finalizer commits a chunk once this much undecoded audio is
+    /// pending. Smaller on constrained machines: chunks decode faster there
+    /// AND the release-time tail (what the user actually waits on) stays
+    /// short even for mid-length utterances.
+    pub commit_after_ms: u64,
 }
 
 impl PerfProfile {
@@ -55,6 +60,7 @@ impl PerfProfile {
                 partial_threads: 2,
                 chunk_threads: (cores / 2).clamp(2, 3),
                 tail_threads: (cores - 2).max(2),
+                commit_after_ms: 3_000,
             }
         } else {
             PerfProfile {
@@ -63,6 +69,7 @@ impl PerfProfile {
                 partial_threads: 3,
                 chunk_threads: 4,
                 tail_threads: (cores - 1).max(2),
+                commit_after_ms: 5_000,
             }
         }
     }
@@ -122,6 +129,7 @@ mod tests {
         // Overlapping passes (partials + chunks) must leave cores free.
         assert!(p.partial_threads + p.chunk_threads < 8);
         assert_eq!(p.tail_threads, 6);
+        assert_eq!(p.commit_after_ms, 3_000);
     }
 
     #[test]

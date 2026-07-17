@@ -18,11 +18,27 @@ pub struct WhisperEngine {
     /// the model context alive via its internal Arc.
     state: WhisperState,
     model_name: String,
+    /// Whether this engine was created with GPU offload enabled (only
+    /// possible under the `gpu-vulkan` feature).
+    gpu: bool,
 }
 
 impl WhisperEngine {
+    /// Final-pass engine: uses the GPU when compiled with `gpu-vulkan`.
     pub fn from_file(model_path: &Path) -> Result<Self, SttError> {
-        let params = WhisperContextParameters::default();
+        Self::new(model_path, cfg!(feature = "gpu-vulkan"))
+    }
+
+    /// CPU-pinned engine for live captions: the small model is fast enough
+    /// on 2 cores, and keeping it off the GPU means partial decodes never
+    /// contend with the latency-critical final/chunk passes.
+    pub fn from_file_cpu(model_path: &Path) -> Result<Self, SttError> {
+        Self::new(model_path, false)
+    }
+
+    fn new(model_path: &Path, use_gpu: bool) -> Result<Self, SttError> {
+        let mut params = WhisperContextParameters::default();
+        params.use_gpu(use_gpu);
         let context = WhisperContext::new_with_params(
             model_path
                 .to_str()
@@ -38,7 +54,11 @@ impl WhisperEngine {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "unknown".into());
         drop(context); // state's internal Arc keeps the model alive
-        Ok(Self { state, model_name })
+        Ok(Self {
+            state,
+            model_name,
+            gpu: use_gpu,
+        })
     }
 }
 
@@ -102,7 +122,8 @@ impl SttEngine for WhisperEngine {
     }
 
     fn describe(&self) -> String {
-        format!("whisper.cpp {} (CPU)", self.model_name)
+        let backend = if self.gpu { "Vulkan GPU" } else { "CPU" };
+        format!("whisper.cpp {} ({backend})", self.model_name)
     }
 
     /// A real decode over half a second of silence pages in the weights and

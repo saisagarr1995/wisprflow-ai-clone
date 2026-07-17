@@ -25,11 +25,12 @@ pub type SharedStt = Arc<Mutex<Box<dyn SttEngine>>>;
 pub struct Committed {
     pub text: String,
     pub until: u64,
+    /// Language pinned from the first auto-detected chunk, so the tail
+    /// decode skips whisper's per-decode detection pass.
+    pub language: Option<String>,
 }
 
 const SR: u64 = TARGET_SAMPLE_RATE as u64;
-/// Commit a chunk once at least this much undecoded audio is pending.
-const COMMIT_AFTER: u64 = 5 * SR;
 /// Never commit the freshest audio — the user is mid-word there.
 const HOLDBACK: u64 = SR * 12 / 10;
 /// The cut lands on the quietest 80 ms window inside the last second of the
@@ -64,7 +65,10 @@ pub struct StreamFinalizer {
 }
 
 impl StreamFinalizer {
-    pub fn spawn(stt: SharedStt, interval: Duration) -> Self {
+    /// `commit_after` — commit a chunk once at least this much undecoded
+    /// audio is pending (hardware-adaptive; see `PerfProfile.commit_after_ms`).
+    pub fn spawn(stt: SharedStt, interval: Duration, commit_after: Duration) -> Self {
+        let commit_after = commit_after.as_millis() as u64 * SR / 1000;
         let (tx, rx) = mpsc::channel::<Cmd>();
         let thread = std::thread::Builder::new()
             .name("openflow-finalizer".into())
@@ -92,6 +96,7 @@ impl StreamFinalizer {
                                 committed: Committed {
                                     text: String::new(),
                                     until: from,
+                                    language: None,
                                 },
                             });
                             continue;
@@ -108,7 +113,7 @@ impl StreamFinalizer {
                     let (chunk, cut) = {
                         let h = s.history.lock().expect("history lock");
                         let head = h.head();
-                        if head.saturating_sub(s.committed.until) < COMMIT_AFTER + HOLDBACK {
+                        if head.saturating_sub(s.committed.until) < commit_after + HOLDBACK {
                             continue;
                         }
                         let end = head - HOLDBACK;
@@ -136,10 +141,12 @@ impl StreamFinalizer {
                     match result {
                         Ok(t) => {
                             // Pin the first auto-detected language so later
-                            // chunks (and their extra detection pass) reuse it.
+                            // chunks — and the release-time tail decode —
+                            // skip their extra detection pass.
                             if s.opts.language.is_none() {
                                 s.opts.language = t.language.clone();
                             }
+                            s.committed.language = s.opts.language.clone();
                             let text = t.text.trim();
                             if !text.is_empty() {
                                 if !s.committed.text.is_empty() {
@@ -210,7 +217,7 @@ fn quietest_offset(region: &[f32]) -> usize {
     best_at
 }
 
-fn tail_chars(text: &str, n: usize) -> String {
+pub(crate) fn tail_chars(text: &str, n: usize) -> String {
     let start = text
         .char_indices()
         .rev()
@@ -231,14 +238,14 @@ mod tests {
         history.lock().unwrap().push(&vec![0.4; 8 * SR as usize]);
 
         let stt: SharedStt = Arc::new(Mutex::new(Box::new(FakeStt::with_responses(["chunk one"]))));
-        let worker = StreamFinalizer::spawn(stt, Duration::from_millis(20));
+        let worker = StreamFinalizer::spawn(stt, Duration::from_millis(20), Duration::from_secs(5));
         worker.start(history.clone(), 0, TranscribeOpts::default());
         std::thread::sleep(Duration::from_millis(300));
 
         let committed = worker.finish();
         assert_eq!(committed.text, "chunk one");
         // The cut is behind the head by at least the holdback.
-        assert!(committed.until >= COMMIT_AFTER);
+        assert!(committed.until >= 5 * SR);
         assert!(committed.until <= 8 * SR - HOLDBACK);
         drop(worker); // must join, not hang
     }
@@ -249,7 +256,7 @@ mod tests {
         history.lock().unwrap().push(&vec![0.4; SR as usize]); // 1 s: below threshold
 
         let stt: SharedStt = Arc::new(Mutex::new(Box::new(FakeStt::with_responses(["nope"]))));
-        let worker = StreamFinalizer::spawn(stt, Duration::from_millis(20));
+        let worker = StreamFinalizer::spawn(stt, Duration::from_millis(20), Duration::from_secs(5));
         worker.start(history, 0, TranscribeOpts::default());
         std::thread::sleep(Duration::from_millis(120));
 

@@ -414,8 +414,17 @@ impl Orchestrator {
             let (dict_terms, snippet_defs) = self.personalization();
 
             // Decode the remaining tail with the options built at key-down
-            // (same bias the chunk passes saw).
-            let opts = self.session_opts.clone();
+            // (same bias the chunk passes saw). When chunks already
+            // committed, reuse their pinned language (skips whisper's
+            // detection pass — a large slice of tail latency on auto-detect)
+            // and continue from their text instead of the bias prompt.
+            let mut opts = self.session_opts.clone();
+            if opts.language.is_none() {
+                opts.language = committed.language.clone();
+            }
+            if !committed.text.is_empty() {
+                opts.initial_prompt = Some(crate::finalizer::tail_chars(&committed.text, 120));
+            }
             let stt_started = Instant::now();
             let tail = match outcome {
                 Some(audio) => {

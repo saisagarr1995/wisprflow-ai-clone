@@ -21,6 +21,17 @@ jobs:
         run: |
           "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "C:\Program Files\CMake\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      # Build-time only: gives the app GPU-accelerated STT (whisper.cpp
+      # Vulkan backend — works on AMD/Intel/NVIDIA alike). End users need
+      # nothing extra; the app falls back to CPU when no GPU is usable.
+      - name: Install Vulkan SDK (for gpu-vulkan feature)
+        shell: pwsh
+        run: |
+          $ver = "1.4.313.2"
+          curl.exe -L -o "$env:RUNNER_TEMP\vulkan_sdk.exe" "https://sdk.lunarg.com/sdk/download/$ver/windows/vulkansdk-windows-X64-$ver.exe"
+          Start-Process "$env:RUNNER_TEMP\vulkan_sdk.exe" -ArgumentList "--accept-licenses","--default-answer","--confirm-command","install" -Wait
+          "VULKAN_SDK=C:\VulkanSDK\$ver" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "C:\VulkanSDK\$ver\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -33,7 +44,7 @@ jobs:
       # Produces the NSIS installer (.exe) + the standalone binary. Pin to
       # Windows bundles so the Mac/Linux targets in tauri.conf.json don't error.
       - name: Build installer (tauri build)
-        run: npm run tauri build -- --bundles nsis
+        run: npm run tauri build -- --bundles nsis --features gpu-vulkan
         working-directory: apps/desktop
 
       # This is a Cargo workspace, so build output lands in the workspace-root
