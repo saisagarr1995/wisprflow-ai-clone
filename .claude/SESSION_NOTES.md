@@ -50,6 +50,11 @@ streaming finalizer (PR #8) being installed and previously verified at ~1-2 s.
 - Classifier still blocks removing the Ollama Run key; killed the processes
   and told the user the `Remove-ItemProperty` command again.
 
+**Outcome:** User tested the debug build on-device 2026-07-17 and confirmed
+dictation is fast and working. PR #11 open (tests green, clippy clean) —
+user to merge; installed app under %LOCALAPPDATA%\OpenFlow still runs the
+OLD build until a CI installer from merged main is installed.
+
 **Next / open:**
 - User must remove Ollama autostart themselves (see command in PR/summary).
 - If captions still feel slow on this box: consider sharing one whisper
