@@ -29,7 +29,7 @@ key event (any key on system)
 2. `audio.end_session()` + VAD `trim_silence`; <300 ms audio = fumble, skipped entirely.
 3. **STT tail decode** — `stt.transcribe(tail)` (whisper.cpp, all-but-one cores). → `timing.stt_ms`
 4. Voice command check `try_run_command` — if the utterance matches a command, dictation path stops here (Flow 2).
-5. Post-processing (deterministic, fast): dictionary fuzzy-replace → coding grammar/casing (Coding/Terminal profile) → snippet match (snippet SHORT-CIRCUITS the LLM).
+5. Post-processing (deterministic, fast): dictionary fuzzy-replace → coding grammar/casing (Coding/Terminal profile) OR prose tidy (`crates/postproc/src/tidy.rs`: stutter/bigram-repeat collapse, filler removal, sentence caps, terminal `.`/`?` heuristic — always on, works with LLM off) → snippet match (snippet SHORT-CIRCUITS the LLM).
 6. **LLM cleanup** — `CleanupService::cleanup` via Ollama; guard can reject → falls back to raw. Skipped for terminals/identifiers. → `timing.llm_ms`
 7. Focus re-check — if the focused app changed since key-down, injection is ABORTED (never paste into wrong window).
 8. Injection — clipboard paste (`win_clipboard.rs`) or keystrokes for terminals (`win_keystroke.rs`). → `timing.inject_ms`
@@ -42,7 +42,8 @@ Per-stage timings are RECORDED for every dictation: `DictationTiming {audio_ms, 
 
 | Symptom | Likely stage | Where to look |
 |---|---|---|
-| Slow only on FIRST dictation after launch | Whisper model load or Ollama cold model load | shell init in `lib.rs`; `ollama.rs` (60s request timeout) |
+| ALL decodes slow on a low-RAM machine (~20s finals) | Memory pressure: check free RAM + whether Ollama autostarted (`HKCU:...\Run` key). Whisper decode state is allocated ONCE per engine and reused (`whisper.rs`); if that regresses to per-call `create_state`, page-fault storms return | `crates/stt/src/whisper.rs`; Task Manager |
+| Slow only on FIRST dictation after launch | Cold model pages (engines are warm-decoded at startup — `warm_up` in `lib.rs`/`whisper.rs`) or Ollama cold model load | shell init in `lib.rs`; `ollama.rs` (60s request timeout) |
 | `llm_ms` dominates | Ollama slow/cold/wrong model | `crates/llm/src/ollama.rs`, `cleanup.rs`; `ollama-setup` skill |
 | `stt_ms` dominates and grows with utterance length | StreamFinalizer not running (finalizer=None) or chunks not committing | `crates/core/src/finalizer.rs` (COMMIT_AFTER=5s, HOLDBACK=1.2s, CHUNK_THREADS=4, 400ms poll) |
 | `stt_ms` high but flat | Model too big for CPU / thread config | `crates/stt/src/whisper.rs`; model choice in Settings → Models |

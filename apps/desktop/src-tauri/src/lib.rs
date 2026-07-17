@@ -237,6 +237,17 @@ fn bootstrap_pipeline(
         stt.clone(),
         std::time::Duration::from_millis(400),
     ));
+    // Warm the final engine off the latency path: the first dictation after
+    // launch used to pay for lazy buffer init + cold weight pages. A real
+    // dictation starting mid-warm just waits on the same mutex it always
+    // shared with the chunk finalizer.
+    {
+        let warm_stt = stt.clone();
+        std::thread::Builder::new()
+            .name("openflow-stt-warm".into())
+            .spawn(move || warm_stt.lock().expect("stt lock").warm_up())
+            .map_err(|e| e.to_string())?;
+    }
     let audio = audio_factory(config.audio.input_device.clone());
 
     let vad_path = openflow_models::ensure("silero-vad-v5", |_| {}).map_err(|e| e.to_string())?;
@@ -253,7 +264,8 @@ fn bootstrap_pipeline(
         .map_err(|e| e.to_string())
         .and_then(|p| openflow_stt::WhisperEngine::from_file(&p).map_err(|e| e.to_string()))
     {
-        Ok(engine) => {
+        Ok(mut engine) => {
+            openflow_stt::SttEngine::warm_up(&mut engine);
             let partial_app = app.clone();
             Some(openflow_core::PartialWorker::spawn(
                 Box::new(engine),

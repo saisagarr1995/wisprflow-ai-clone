@@ -346,8 +346,11 @@ impl Orchestrator {
                         matches!(profile, Some(openflow_context::AppProfile::Terminal));
 
                     // 1. Dictionary fuzzy-replace. 2. Coding grammar / casing
-                    // commands. 3. Snippet short-circuit. 4. LLM cleanup with
-                    // guard + fallback (skipped in terminals: literal only).
+                    // commands; prose gets the deterministic tidy pass
+                    // (stutters, fillers, punctuation) so text is Wispr-clean
+                    // even with the LLM off. 3. Snippet short-circuit. 4. LLM
+                    // cleanup with guard + fallback (skipped in terminals:
+                    // literal only).
                     let after_dict = openflow_postproc::apply_dictionary(&raw, &dict_terms);
                     let mut identifier_result = false;
                     let after_dict = if coding_mode {
@@ -358,7 +361,7 @@ impl Orchestrator {
                             openflow_postproc::apply_coding_grammar(&after_dict)
                         }
                     } else {
-                        after_dict
+                        openflow_postproc::tidy_transcript(&after_dict)
                     };
                     let final_text = if let Some(expansion) =
                         openflow_postproc::match_snippet(&after_dict, &snippet_defs)
@@ -699,7 +702,8 @@ mod tests {
         h.handle.post(SessionEvent::HotkeyReleased);
         h.shutdown();
 
-        assert_eq!(h.injected(), vec!["hello world ".to_string()]);
+        // Prose passes through the deterministic tidy: capitalized + closed.
+        assert_eq!(h.injected(), vec!["Hello world. ".to_string()]);
         let statuses = h.statuses.lock().unwrap().clone();
         assert_eq!(
             statuses,
@@ -712,7 +716,7 @@ mod tests {
         );
         let timings = h.timings.lock().unwrap();
         assert_eq!(timings.len(), 1);
-        assert_eq!(timings[0].chars, "hello world ".chars().count());
+        assert_eq!(timings[0].chars, "Hello world. ".chars().count());
     }
 
     #[test]
@@ -724,7 +728,7 @@ mod tests {
         h.handle.post(SessionEvent::HotkeyPressed);
         h.shutdown();
 
-        assert_eq!(h.injected(), vec!["toggled ".to_string()]);
+        assert_eq!(h.injected(), vec!["Toggled. ".to_string()]);
     }
 
     #[test]
@@ -749,7 +753,7 @@ mod tests {
         dictate(&h);
         h.shutdown();
 
-        assert_eq!(h.injected(), vec!["run kubectl apply ".to_string()]);
+        assert_eq!(h.injected(), vec!["Run kubectl apply. ".to_string()]);
         let calls = stt.calls.lock().unwrap();
         assert_eq!(calls[0].opts.initial_prompt.as_deref(), Some("kubectl"));
     }
