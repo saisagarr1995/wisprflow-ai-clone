@@ -135,6 +135,11 @@ impl StreamFinalizer {
                     let result = stt.lock().expect("stt lock").transcribe(&chunk, &opts);
                     match result {
                         Ok(t) => {
+                            // Pin the first auto-detected language so later
+                            // chunks (and their extra detection pass) reuse it.
+                            if s.opts.language.is_none() {
+                                s.opts.language = t.language.clone();
+                            }
                             let text = t.text.trim();
                             if !text.is_empty() {
                                 if !s.committed.text.is_empty() {

@@ -57,6 +57,10 @@ pub enum HotkeyMode {
     Hold,
     /// Press once to start, again to stop.
     Toggle,
+    /// Hands-free: press once (or click the HUD pill) to start; recording
+    /// finishes on its own after a couple of seconds of silence. A second
+    /// press also stops it, like Toggle.
+    HandsFree,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

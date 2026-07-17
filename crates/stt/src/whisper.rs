@@ -64,9 +64,11 @@ impl SttEngine for WhisperEngine {
         // fallback ladder can multiply latency ~5x on hard audio, and
         // dictation always prefers the fast greedy pass.
         params.set_temperature_inc(0.0);
-        if let Some(lang) = opts.language.as_deref() {
-            params.set_language(Some(lang));
-        }
+        // `None` = auto-detect. whisper.cpp only detects when the language is
+        // explicitly "auto"; leaving it unset silently decodes as English,
+        // which broke every non-English dictation. English-only models
+        // (ggml-*.en) ignore this and always produce English.
+        params.set_language(Some(opts.language.as_deref().unwrap_or("auto")));
         if let Some(prompt) = opts.initial_prompt.as_deref() {
             params.set_initial_prompt(prompt);
         }
@@ -83,9 +85,18 @@ impl SttEngine for WhisperEngine {
             text.push_str(&piece);
         }
 
+        // Report what was actually decoded: the forced language, or whatever
+        // auto-detection picked on a multilingual model.
+        let language = match opts.language.clone() {
+            Some(lang) => Some(lang),
+            None => {
+                whisper_rs::get_lang_str(self.state.full_lang_id_from_state()).map(str::to_string)
+            }
+        };
+
         Ok(Transcript {
             text: strip_annotations(&text),
-            language: opts.language.clone(),
+            language,
         })
     }
 

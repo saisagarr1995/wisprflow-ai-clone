@@ -3,11 +3,23 @@
 use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
+use openflow_core::SessionEvent;
 use openflow_settings::{Config, SettingsHandle};
 use openflow_store::{CustomCommand, DictEntry, HistoryEntry, Snippet, Store};
+
+/// A clickable region of the HUD, in logical pixels relative to the HUD
+/// window's top-left. The cursor-poll thread in `lib.rs` makes the window
+/// click-through everywhere outside these.
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct HudZone {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
 
 /// Shared state managed by Tauri. `level_slot` is filled by the pipeline
 /// bootstrap (and refreshed when the audio engine is rebuilt).
@@ -17,6 +29,10 @@ pub struct AppState {
     pub level_slot: Arc<Mutex<Option<Arc<AtomicU32>>>>,
     /// 0 = idle, 1 = recording, 2 = processing (mirror of core::Status).
     pub status: Arc<AtomicU8>,
+    /// Filled by the pipeline bootstrap; lets the HUD post session events.
+    pub orchestrator: Arc<Mutex<Option<openflow_core::OrchestratorHandle>>>,
+    /// Interactive regions reported by the HUD frontend for the current state.
+    pub hud_zones: Arc<Mutex<Vec<HudZone>>>,
 }
 
 #[tauri::command]
@@ -40,6 +56,45 @@ pub fn set_config(state: State<AppState>, config: Config) -> Result<(), String> 
         .settings
         .update(|c| *c = config)
         .map_err(|e| e.to_string())
+}
+
+fn post_session_event(state: &State<AppState>, event: SessionEvent) {
+    if let Some(handle) = state
+        .orchestrator
+        .lock()
+        .expect("orchestrator slot")
+        .as_ref()
+    {
+        handle.post(event);
+    }
+}
+
+/// HUD pill clicked while idle: start dictating.
+#[tauri::command]
+pub fn hud_start(state: State<AppState>) {
+    tracing::debug!("ui: hud start clicked");
+    post_session_event(&state, SessionEvent::HudStart);
+}
+
+/// HUD stop button: finish the session and paste.
+#[tauri::command]
+pub fn hud_finish(state: State<AppState>) {
+    tracing::debug!("ui: hud finish clicked");
+    post_session_event(&state, SessionEvent::HudFinish);
+}
+
+/// HUD cancel button: discard the session.
+#[tauri::command]
+pub fn hud_cancel(state: State<AppState>) {
+    tracing::debug!("ui: hud cancel clicked");
+    post_session_event(&state, SessionEvent::HudCancel);
+}
+
+/// The HUD reports its clickable regions whenever its layout changes; the
+/// cursor-poll thread uses them for selective click-through.
+#[tauri::command]
+pub fn hud_zones(state: State<AppState>, zones: Vec<HudZone>) {
+    *state.hud_zones.lock().expect("hud zones") = zones;
 }
 
 #[tauri::command]

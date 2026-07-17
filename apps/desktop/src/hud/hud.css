@@ -18,13 +18,55 @@
   pointer-events: none;
 }
 
-/* Idle: a subtle handle bar, like a home indicator. */
+/* Idle: a subtle handle bar, like a home indicator. Hover expands it into a
+   hint pill; clicking starts dictation (Wispr-style). */
+.hud-idle {
+  pointer-events: auto;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 18px;
+  padding: 6px 10px;
+}
+
 .hud-handle {
   width: 46px;
   height: 6px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.32);
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+  transition: background 120ms ease-out;
+}
+
+.hud-idle:hover .hud-handle {
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.hud-idle.is-hovered {
+  padding: 0;
+}
+
+.hud-hint {
+  padding: 9px 18px;
+  border-radius: 999px;
+  background: #0b0b0d;
+  color: #f4f4f5;
+  font-size: 14px;
+  font-weight: 550;
+  white-space: nowrap;
+  box-shadow:
+    0 6px 20px rgba(0, 0, 0, 0.5),
+    0 0 0 0.5px rgba(255, 255, 255, 0.08) inset;
+  animation: hud-rise 140ms ease-out;
+}
+
+.hud-hint b {
+  background: linear-gradient(90deg, #e6a1f2 0%, #a8b6ff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-weight: 700;
 }
 
 /* Recording/processing stack: text pill above the waveform pill. */
@@ -55,18 +97,87 @@
 }
 
 .hud-pill {
+  pointer-events: auto;
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 34px;
+  gap: 8px;
+  height: 38px;
   min-width: 92px;
-  padding: 0 16px;
+  padding: 0 8px;
   border-radius: 999px;
   background: #0b0b0d;
   box-shadow:
     0 6px 20px rgba(0, 0, 0, 0.5),
     0 0 0 0.5px rgba(255, 255, 255, 0.08) inset;
   animation: hud-rise 160ms ease-out;
+}
+
+/* Cancel (X) and finish-and-paste (stop) buttons flanking the waveform. */
+.hud-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 100ms ease-out, background 120ms ease-out;
+}
+
+.hud-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.hud-btn:hover {
+  transform: scale(1.08);
+}
+
+.hud-btn-cancel {
+  background: rgba(255, 255, 255, 0.14);
+  color: #d9d9de;
+}
+
+.hud-btn-cancel:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.hud-btn-finish {
+  background: #e5484d;
+  color: #ffe9ea;
+}
+
+.hud-btn-finish:hover {
+  background: #ef5b60;
+}
+
+/* Tooltip above the buttons ("Cancel" / "Finish and paste"). */
+.hud-btn::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%) translateY(2px);
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #0b0b0d;
+  color: #f4f4f5;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 100ms ease-out, transform 100ms ease-out;
+}
+
+.hud-btn:hover::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 
 .hud-pill.is-processing {

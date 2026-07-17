@@ -1,10 +1,12 @@
 import { Config } from "../../lib/ipc";
 import { PageHeader, Row, Section, Select, inputCls } from "../ui";
 
-const HOTKEY_PRESETS = ["RCtrl", "RAlt", "F9", "Ctrl+Shift+Space", "Ctrl+Shift+D"];
+const HOTKEY_PRESETS = ["Ctrl+Win", "RCtrl", "RAlt", "F9", "Ctrl+Shift+Space", "Ctrl+Shift+D"];
 const LANGUAGES: Array<[string, string]> = [
   ["auto", "Auto-detect"],
   ["en", "English"],
+  ["ta", "Tamil"],
+  ["te", "Telugu"],
   ["hi", "Hindi"],
   ["de", "German"],
   ["fr", "French"],
@@ -53,15 +55,18 @@ export default function General({
         </Row>
         <Row
           label="Mode"
-          hint="Hold: press and hold to talk. Toggle: press once to start, again to stop."
+          hint="Hold: press and hold to talk. Toggle: press once to start, again to stop. Hands-free: press once (or click the pill), it stops by itself when you go quiet."
         >
           <Select
             className="w-52"
             value={config.hotkey.mode}
-            onChange={(v) => update((c) => void (c.hotkey.mode = v as "hold" | "toggle"))}
+            onChange={(v) =>
+              update((c) => void (c.hotkey.mode = v as "hold" | "toggle" | "hands_free"))
+            }
             options={[
               { value: "hold", label: "Hold (push-to-talk)" },
               { value: "toggle", label: "Toggle" },
+              { value: "hands_free", label: "Hands-free (auto-stop)" },
             ]}
           />
         </Row>
@@ -76,6 +81,14 @@ export default function General({
             options={LANGUAGES.map(([id, label]) => ({ value: id, label }))}
           />
         </Row>
+        {(config.language !== "en" || config.stt.model_id.endsWith("-multi")) && (
+          <p className="mt-2 text-xs text-zinc-400">
+            Non-English and auto-detect need a <b>multilingual</b> speech model — pick{" "}
+            <code>whisper-small-multi</code> (best for Tamil/Telugu) or{" "}
+            <code>whisper-base-multi</code> (faster) under <b>Models &amp; AI</b>. The default{" "}
+            <code>whisper-base</code> model is English-only.
+          </p>
+        )}
       </Section>
 
       <Section title="Injection">

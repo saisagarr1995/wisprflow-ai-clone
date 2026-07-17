@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import { Config, getConfig, hudCancel, hudFinish, hudStart, hudZones } from "../lib/ipc";
 import "./hud.css";
 
 const log = (msg: string) => invoke("ui_log", { msg }).catch(() => {});
@@ -10,32 +11,49 @@ type HudState = "idle" | "recording" | "processing" | "flash";
 const BAR_COUNT = 14;
 const IDLE_BARS = Array(BAR_COUNT).fill(0.12);
 
+/** "Ctrl+Win" → "Ctrl + Win" for the idle hint pill. */
+const prettyChord = (chord: string) => chord.split("+").join(" + ");
+
 /**
  * The Wispr Flow-style floating pill. Minimal and compact:
- *  - idle: a tiny handle bar at the very bottom of the screen
- *  - recording: a small dark capsule with a live waveform; a text pill with the
- *    streaming partial floats above it once words arrive
- *  - processing: the waveform gently pulses while the final pass + LLM run
- *  - flash: a brief confirmation pill after a voice command
- * The window is transparent and click-through; content is bottom-anchored.
+ *  - idle: a tiny handle bar; hovering it expands a hint pill
+ *    ("Click or hold Ctrl + Win to start dictating"); clicking starts.
+ *  - recording: a dark capsule with a cancel (X) button, a live waveform and
+ *    a finish-and-paste (stop) button; a text pill with the streaming partial
+ *    floats above it once words arrive.
+ *  - processing: the waveform gently pulses while the final pass + LLM run.
+ *  - flash: a brief confirmation pill after a voice command.
+ * The window never takes focus; Rust-side hit-testing makes only the zones
+ * this component reports clickable, everything else stays click-through.
  */
 export default function Hud() {
   const [state, setState] = useState<HudState>("idle");
+  const [hovered, setHovered] = useState(false);
+  const [chord, setChord] = useState("RCtrl");
   const [partial, setPartial] = useState("");
   const [flash, setFlash] = useState("");
   const [bars, setBars] = useState<number[]>(IDLE_BARS);
   const levelsRef = useRef<number[]>([...IDLE_BARS]);
   const peakRef = useRef(0.02);
   const flashTimer = useRef<number | undefined>(undefined);
+  const zoneRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const unsubs: Array<() => void> = [];
     log("hud mounted");
 
+    getConfig()
+      .then((c) => setChord(c.hotkey.chord))
+      .catch(() => {});
+    listen<Config>("config", (e) => setChord(e.payload.hotkey.chord)).then((u) =>
+      unsubs.push(u),
+    );
+
     listen<string>("status", (e) => {
       const s = e.payload as "idle" | "recording" | "processing";
       log(`hud status=${s}`);
       setState(s);
+      setHovered(false);
       if (s === "recording") {
         setPartial("");
         setFlash("");
@@ -79,9 +97,48 @@ export default function Hud() {
     };
   }, []);
 
+  // Report the clickable region (idle pill / recording capsule) after every
+  // layout change; Rust polls the cursor against these to decide when the
+  // otherwise click-through window should accept the mouse. Processing and
+  // flash have nothing to click.
+  useEffect(() => {
+    const el = zoneRef.current;
+    if ((state !== "idle" && state !== "recording") || !el) {
+      hudZones([]).catch(() => {});
+      return;
+    }
+    const r = el.getBoundingClientRect();
+    // A little slack so the zone survives the hover-expansion animation and
+    // near-miss clicks.
+    hudZones([
+      { x: r.left - 6, y: r.top - 6, width: r.width + 12, height: r.height + 12 },
+    ]).catch(() => {});
+  }, [state, hovered, partial]);
+
   return (
     <div className="hud-root">
-      {state === "idle" && <div className="hud-handle" />}
+      {state === "idle" && (
+        <div
+          ref={zoneRef}
+          className={`hud-idle ${hovered ? "is-hovered" : ""}`}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+          onClick={() => {
+            log("hud idle pill clicked");
+            hudStart().catch(() => {});
+          }}
+          role="button"
+          title=""
+        >
+          {hovered ? (
+            <span className="hud-hint">
+              Click or hold <b>{prettyChord(chord)}</b> to start dictating
+            </span>
+          ) : (
+            <div className="hud-handle" />
+          )}
+        </div>
+      )}
 
       {state === "flash" && (
         <div className="hud-flash">
@@ -106,7 +163,30 @@ export default function Hud() {
               <span>{partial}</span>
             </div>
           )}
-          <div className={`hud-pill ${state === "processing" ? "is-processing" : ""}`}>
+          <div
+            ref={state === "recording" ? zoneRef : undefined}
+            className={`hud-pill ${state === "processing" ? "is-processing" : ""}`}
+          >
+            {state === "recording" && (
+              <button
+                className="hud-btn hud-btn-cancel"
+                data-tip="Cancel"
+                onClick={() => {
+                  log("hud cancel clicked");
+                  hudCancel().catch(() => {});
+                }}
+                aria-label="Cancel"
+              >
+                <svg viewBox="0 0 20 20" aria-hidden>
+                  <path
+                    d="M6 6l8 8M14 6l-8 8"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+            )}
             <div className="hud-wave">
               {bars.map((v, i) => (
                 <span
@@ -116,6 +196,21 @@ export default function Hud() {
                 />
               ))}
             </div>
+            {state === "recording" && (
+              <button
+                className="hud-btn hud-btn-finish"
+                data-tip="Finish and paste"
+                onClick={() => {
+                  log("hud finish clicked");
+                  hudFinish().catch(() => {});
+                }}
+                aria-label="Finish and paste"
+              >
+                <svg viewBox="0 0 20 20" aria-hidden>
+                  <rect x="6" y="6" width="8" height="8" rx="1.5" fill="currentColor" />
+                </svg>
+              </button>
+            )}
           </div>
         </div>
       )}
