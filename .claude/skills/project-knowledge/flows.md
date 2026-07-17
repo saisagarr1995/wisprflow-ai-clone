@@ -108,7 +108,9 @@ Settings → Models page → `download_model` / `list_models` IPC → `openflow-
 |---|---|---|
 | Hotkey | RCtrl (Hold mode; Toggle + HandsFree available) | settings schema |
 | Hands-free tick / silence hold / min peak | 200 ms / 2 s / 0.015 RMS | orchestrator.rs consts |
-| Decode budget (partial interval/threads, chunk threads, tail threads) | ADAPTIVE via `PerfProfile::get()` — Constrained (≤4 cores or ≤8 GB RAM): 600 ms / 2 / 3 / cores−2; Standard: 350 ms / 3 / 4 / cores−1 | `crates/stt/src/perf.rs` (Meetily-style tiers; logged at startup as "decode budget") |
+| Decode budget (partial interval/threads, chunk threads, tail threads, commit-after) | ADAPTIVE via `PerfProfile::get()` — Constrained (≤4 cores or ≤8 GB RAM): 600 ms / 2 / 3 / cores−2 / 3 s; Standard: 350 ms / 3 / 4 / cores−1 / 5 s | `crates/stt/src/perf.rs` (Meetily-style tiers; logged at startup as "decode budget") |
+| GPU STT | opt-in `gpu-vulkan` cargo feature (whisper.cpp Vulkan; CI installs LunarG SDK on the runner and release builds ship with it; local dev builds are CPU unless the SDK is installed). Final engine GPU, partials engine ALWAYS CPU (`from_file_cpu`) so captions never contend. Startup log "final stt engine" shows the backend | `crates/stt/src/whisper.rs`, `.github/workflows/build-app.yml` |
+| Tail decode language | pinned from first finalizer chunk (`Committed.language`) when config = auto, skipping whisper's per-decode detection pass; tail prompt = committed-text tail for continuity | orchestrator.rs `finish_recording` |
 | Finalizer poll / commit threshold / holdback | 400 ms / 5 s / 1.2 s | finalizer.rs consts |
 | Min utterance | 300 ms | orchestrator.rs:282 |
 | Ollama connect / request timeout | 3 s / 60 s | ollama.rs |

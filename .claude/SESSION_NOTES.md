@@ -4,6 +4,31 @@ Newest first. One entry per working session: what was done, challenges hit,
 how they were solved, and what's next. Keep entries short — this file is
 read at the start of future sessions.
 
+## 2026-07-17 (later-2) — "instant" push: streaming + language pinning + Vulkan via CI (same branch)
+
+**Status: code DONE + validated locally on CPU; GPU installer building in CI
+(run 29589398160).** User: "main is instant, this branch takes 30s; want
+real-time like Wispr". Measured reality: their real dictation showed
+stt 4.76 s for ~6 s speech — CPU-bound base-model decode (RTF ≈ 0.8 on the
+4700U), NOT a branch regression (debug builds still get optimized C++ —
+whisper-rs-sys forces cmake Release always). Changes: (1) Constrained tier
+`commit_after_ms` 3 s (Standard 5 s) → tail at release stays short even for
+mid-length utterances; (2) `Committed.language` pins the chunk-detected
+language into the tail decode (skips auto-detect pass) + tail prompt =
+committed-text tail; (3) Latency.tsx seeds from `history_list` on mount
+(was empty until first dictation) then live-appends `timing` events;
+(4) `gpu-vulkan` cargo feature → whisper.cpp Vulkan (final engine GPU,
+partials `from_file_cpu` ALWAYS CPU); build-app.yml installs pinned LunarG
+SDK 1.4.313.2 on the RUNNER and builds `--features gpu-vulkan`.
+**User boundaries stated this session: no local software installs (they
+cancelled the Vulkan SDK UAC prompt — do NOT retry locally), security
+first, always present a plan first.** E2E validated via SAPI TTS through
+speakers + synthetic RCtrl hold (volume-up keys first — initial run heard
+nothing): "dictation injected stt_ms=4835 total_ms=5001 chars=40" into
+Notepad. Next: when CI run finishes, download installer, silent-install
+(/S, per-user), verify startup log says "whisper.cpp ... (Vulkan GPU)" and
+re-measure stt_ms; expect ~3-5x faster finals on the Vega 7 iGPU.
+
 ## 2026-07-17 (later) — adaptive decode budget (same branch `feat/handsfree-pill-multilingual`)
 
 **Status: DONE, verified live.** User reported the app slow again + a laptop
