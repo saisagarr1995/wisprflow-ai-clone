@@ -6,7 +6,11 @@ name: Build Windows App
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   workflow_dispatch:
+
+permissions:
+  contents: write # publish installers to GitHub Releases on v* tags
 
 jobs:
   build-windows:
@@ -71,3 +75,15 @@ jobs:
           name: OpenFlow-Windows-Standalone
           path: C:\ct\release\openflow-desktop.exe
           if-no-files-found: error
+
+      # Tag a commit `vX.Y.Z` and the installer lands on the public Releases
+      # page — the download anyone can use without a GitHub account
+      # (README "Installation — Option A").
+      - name: Publish GitHub Release (version tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $exe = (Get-ChildItem C:\ct\release\bundle\nsis\*.exe).FullName
+          gh release create "${{ github.ref_name }}" $exe --title "OpenFlow ${{ github.ref_name }}" --generate-notes

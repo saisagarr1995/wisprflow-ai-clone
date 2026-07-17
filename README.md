@@ -82,16 +82,24 @@ macOS/Linux: the core crates are cross-platform and CI-built, but the hotkey/inj
 
 ## Installation — Option A: prebuilt installer (recommended)
 
-Every push to `main` builds a signed-free NSIS installer on GitHub Actions.
+**No account, no build tools, nothing to compile — download one file and run it.**
 
-1. Open the repo's **Actions** tab → workflow **"Build Windows App"** → click the latest green run on `main`.
-2. Download the **`OpenFlow-Windows-Installer`** artifact (or `OpenFlow-Windows-Standalone` for a portable exe) and unzip it.
-   With the [GitHub CLI](https://cli.github.com/): `gh run download <run-id> -n OpenFlow-Windows-Installer`
-3. Run the setup exe. It installs per-user to `%LOCALAPPDATA%\OpenFlow` (no admin rights needed). Silent install: `OpenFlow_<version>_x64-setup.exe /S`
+1. Go to the repo's **[Releases page](../../releases/latest)** (right sidebar on GitHub → *Releases*).
+2. Under **Assets**, download **`OpenFlow_<version>_x64-setup.exe`** (~14 MB).
+3. Double-click it. It installs per-user to `%LOCALAPPDATA%\OpenFlow` — **no admin rights needed**. (Windows SmartScreen may warn because the exe is unsigned; choose *More info → Run anyway*.) Silent install: `OpenFlow_<version>_x64-setup.exe /S`
 4. Launch **OpenFlow** from the Start menu. It lives in the system tray (no main window by design).
-5. Continue with [First-run setup](#first-run-setup).
+5. On first dictation the speech model (~150 MB) downloads automatically to `%APPDATA%\openflow\models`.
+6. Continue with [First-run setup](#first-run-setup).
+
+The installer runs on any 64-bit Windows 10/11 machine (built against the standard AVX2 CPU baseline — any Intel/AMD CPU from ~2013 on). It ships CPU transcription by default; machines with a discrete GPU can flip **Settings → Models & AI → GPU transcription**.
 
 To upgrade, install the newer version over the old one. To remove, use Windows **Add/Remove Programs → OpenFlow**.
+
+<details>
+<summary>Alternative: download a development build from GitHub Actions (needs a GitHub login)</summary>
+
+Every push to `main` also uploads artifacts: repo **Actions** tab → workflow **"Build Windows App"** → latest green run → download **`OpenFlow-Windows-Installer`** (or `OpenFlow-Windows-Standalone` for a portable exe) and unzip. With the [GitHub CLI](https://cli.github.com/): `gh run download <run-id> -n OpenFlow-Windows-Installer`
+</details>
 
 ## Installation — Option B: build from source
 
