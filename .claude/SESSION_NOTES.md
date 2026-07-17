@@ -4,6 +4,33 @@ Newest first. One entry per working session: what was done, challenges hit,
 how they were solved, and what's next. Keep entries short — this file is
 read at the start of future sessions.
 
+## 2026-07-17 (later-3) — CI-binary saga: runner MSVC 18 breaks whisper (same branch)
+
+**The single most important fact: installers built on windows-latest with the
+default (preview MSVC v18) toolset produce whisper.cpp code that decodes
+5-20x slower than local v143 builds and dies silently mid-decode (no WER
+entry, no panic) on the Ryzen 4700U. Local debug build of the SAME commit:
+stt 1.5 s for 8 s speech. This masqueraded as: "GPU slow" (10 s decode on
+the Vulkan build), the 16:53 pill-freeze wedge, and the user's "buffering
+forever in all 3 modes".** Fix chain in `ci/ggml-cpu-baseline.cmake`
+(injected via CMAKE_TOOLCHAIN_FILE env — CMake ≥3.21 reads it):
+GGML_NATIVE OFF + AVX2/FMA/F16C ON (first build crashed 0xc000001d — runner
+AVX-512), then CMAKE_GENERATOR_TOOLSET — ClangCL FAILED on the preview VS
+(build dies right after configure, no compile output), **v143 pinned
+instead**. Also: CARGO_TARGET_DIR=C:\ct (MAX_PATH), Vulkan SDK on runner
+only. Real bugs found & fixed along the way: cancel wedged behind in-flight
+chunk decode + slow 2-thread warm-up (both fixed, later-2 entry amended);
+GPU runtime-opt-in (`stt.gpu`, Settings → Models toggle) after measuring
+iGPU 2x SLOWER than CPU; `whisper-base-q5` quantized model added to
+registry (sha256 4baf70dd…, 57 MB; staged in user's models dir; switch
+config AFTER installing a build whose registry has it — earlier binaries
+fail startup on unknown model id!). Releases: README Option A → Releases
+page; v* tags auto-publish installer (build-app.yml, permissions
+contents:write). **User rules this session (in memory/user-boundaries.md):
+no installs without asking, no OS-level changes (incl. volume keys!), no
+heavy local builds, announce TTS voice tests BEFORE running them — the
+surprise robot voice genuinely alarmed the user.**
+
 ## 2026-07-17 (later-2) — "instant" push: streaming + language pinning + Vulkan via CI (same branch)
 
 **Status: code DONE + validated locally on CPU; GPU installer building in CI
