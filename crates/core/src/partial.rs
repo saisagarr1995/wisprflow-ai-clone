@@ -81,8 +81,13 @@ impl PartialWorker {
                             let start = (*from).max(head.saturating_sub(window));
                             h.snapshot(start, head)
                         };
-                        // Skip until there's half a second to say anything about.
-                        if audio.len() < TARGET_SAMPLE_RATE as usize / 2 {
+                        // Skip until there's half a second to say anything
+                        // about, and skip silent windows outright — decoding
+                        // silence costs a full encoder pass (plus a language
+                        // detection pass on auto) to caption nothing.
+                        if audio.len() < TARGET_SAMPLE_RATE as usize / 2
+                            || crate::finalizer::is_silence(&audio)
+                        {
                             continue;
                         }
                         // Few threads: captions are a nicety; they must never

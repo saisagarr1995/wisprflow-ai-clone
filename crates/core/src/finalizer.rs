@@ -128,7 +128,13 @@ impl StreamFinalizer {
                         let cut = end - CUT_SEARCH + quietest_offset(&search) as u64;
                         (h.snapshot(s.committed.until, cut), cut)
                     };
-                    if chunk.is_empty() {
+                    // Skip silent chunks entirely: whisper's encoder costs
+                    // the same for silence as for speech (fixed 30 s
+                    // window) and greedy decode on silence is its WORST
+                    // case (hallucination loops). Long hands-free pauses
+                    // used to burn 3 cores decoding nothing and pile up a
+                    // backlog the release then waited on.
+                    if chunk.is_empty() || is_silence(&chunk) {
                         s.committed.until = cut;
                         continue;
                     }
@@ -215,6 +221,13 @@ impl Drop for StreamFinalizer {
     }
 }
 
+/// No sample loud enough to plausibly be speech. Mic AGC puts speech peaks
+/// well above 0.05; 0.01 keeps even whisper-quiet speech while rejecting
+/// room tone.
+pub(crate) fn is_silence(audio: &[f32]) -> bool {
+    audio.iter().all(|s| s.abs() < 0.01)
+}
+
 /// Offset of the centre of the quietest 80 ms window in `region`.
 fn quietest_offset(region: &[f32]) -> usize {
     const WIN: usize = 1280; // 80 ms at 16 kHz
@@ -281,6 +294,24 @@ mod tests {
         let committed = worker.finish();
         assert_eq!(committed.text, "");
         assert_eq!(committed.until, 0);
+    }
+
+    #[test]
+    fn silent_chunks_are_committed_without_decoding() {
+        let history = Arc::new(Mutex::new(RollingBuffer::new(30 * SR as usize)));
+        history.lock().unwrap().push(&vec![0.001; 8 * SR as usize]); // room tone
+
+        let stt: SharedStt = Arc::new(Mutex::new(Box::new(FakeStt::with_responses([
+            "must never appear",
+        ]))));
+        let worker = StreamFinalizer::spawn(stt, Duration::from_millis(20), Duration::from_secs(5));
+        worker.start(history, 0, TranscribeOpts::default());
+        std::thread::sleep(Duration::from_millis(200));
+
+        let committed = worker.finish();
+        assert_eq!(committed.text, "");
+        // The cut still advanced: silence is consumed, just not decoded.
+        assert!(committed.until >= 5 * SR);
     }
 
     #[test]
