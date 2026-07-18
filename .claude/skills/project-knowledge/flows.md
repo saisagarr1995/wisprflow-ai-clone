@@ -56,6 +56,7 @@ Per-stage timings are RECORDED for every dictation: `DictationTiming {audio_ms, 
 
 | Symptom | Likely stage | Where to look |
 |---|---|---|
+| stt_ms ~30 s FLAT (even 2 s utterances) on an INSTALLED build while a local build of the same commit is fast | CI-compiled whisper binary: runner's preview MSVC emits 5-20x slower kernels (shipped in v0.1.0). ggml is now pinned to clang-cl + Ninja with a configure-time assert; if it recurs, check the exe's Rich header for preview-MSVC object builds | `ci/ggml-cpu-baseline.cmake`, `ci/assert-clang.cmake`, build-app.yml; history DB timings prove it (`SELECT stt_ms FROM history`) |
 | ALL decodes slow on a low-RAM machine (~20s finals) | Memory pressure: check free RAM + whether Ollama autostarted (`HKCU:...\Run` key). Whisper decode state is allocated ONCE per engine and reused (`whisper.rs`); if that regresses to per-call `create_state`, page-fault storms return | `crates/stt/src/whisper.rs`; Task Manager |
 | Slow only on FIRST dictation after launch | Cold model pages (engines are warm-decoded at startup — `warm_up` in `lib.rs`/`whisper.rs`) or Ollama cold model load | shell init in `lib.rs`; `ollama.rs` (60s request timeout) |
 | `llm_ms` dominates | Ollama slow/cold/wrong model | `crates/llm/src/ollama.rs`, `cleanup.rs`; `ollama-setup` skill |

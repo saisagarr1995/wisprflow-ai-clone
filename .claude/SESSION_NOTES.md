@@ -4,6 +4,33 @@ Newest first. One entry per working session: what was done, challenges hit,
 how they were solved, and what's next. Keep entries short — this file is
 read at the start of future sessions.
 
+## 2026-07-18 — v0.1.0 was STILL the slow CI binary; clang-cl+Ninja pin (same branch)
+
+User reported 30-40 s dictations in all three modes on the installed
+v0.1.0. History DB nailed it without touching code: `stt_ms` 28.6-30.8 s
+flat (llm_ms 0) vs 1.4-2.1 s for the local build of the SAME commit — the
+CI binary again. **Why the v143 pin failed: CMAKE_GENERATOR_TOOLSET set in
+a toolchain FILE is silently ignored** (read after the toolset is fixed);
+proven by parsing the installed exe's PE Rich header — its ggml objects
+carry preview-MSVC comp.ids (cl builds 35721/36248) while the fast local
+exe has only v143 (35207/35222/35228). Fix: `ci/ggml-cpu-baseline.cmake`
+now pins CMAKE_C(XX)_COMPILER=clang-cl (choco LLVM) and injects
+`ci/assert-clang.cmake` via CMAKE_PROJECT_INCLUDE — a configure-time
+FATAL_ERROR if the compiler isn't Clang (per-language, tolerant of CMake's
+compiler-test mini-projects where the other language's ID is empty), plus
+the flags clang-cl needs that cl implies: `/EHsc` (clang-cl hard-errors on
+try/catch without it) and `-mavx2 -mfma -mf16c` (ggml's MSVC branch passes
+/arch:AVX2 which under clang does NOT enable the fma/f16c target features
+— kernels would silently degrade). Flags CANNOT go in *_FLAGS_INIT: the
+cmake-rs crate passes explicit CMAKE_C(XX)_FLAGS that override INIT.
+Workflow: choco ninja + `CMAKE_GENERATOR: Ninja` env (cmake-rs honors it)
+so no VS generator/toolset is involved at all. Verified ON the Zen 2
+laptop with a new decode bench (`crates/stt/examples/bench.rs`, TTS wav
+rendered silently to file): clang-cl build 2.5-3.0 s for 13.1 s speech =
+parity with local MSVC v143 (2.8 s), identical transcript. Meetily re-check
+confirmed: no algorithmic trick there — upstream whisper.cpp ships
+clang-built Windows binaries for this exact reason.
+
 ## 2026-07-17 (later-3) — CI-binary saga: runner MSVC 18 breaks whisper (same branch)
 
 **The single most important fact: installers built on windows-latest with the

@@ -24,12 +24,19 @@ jobs:
       # Portable CPU baseline (see the file for why): without it the binary
       # inherits the runner CPU's instruction set and can crash user
       # machines with 0xc000001d. CMake ≥3.21 reads this env var directly.
+      # The same file pins clang-cl as the ggml compiler — the runner's
+      # preview MSVC emits whisper kernels that decode 5-20x slower (this
+      # shipped in v0.1.0 as 30 s dictations on user machines).
       CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}\ci\ggml-cpu-baseline.cmake
+      # Ninja instead of the Visual Studio generator: no VS toolset
+      # selection at all, so the runner's VS version can't leak into the
+      # build. cmake-rs honors this env var.
+      CMAKE_GENERATOR: Ninja
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install LLVM + CMake (whisper.cpp needs libclang + cmake)
-        run: choco install llvm cmake -y
+      - name: Install LLVM + CMake + Ninja (whisper.cpp toolchain)
+        run: choco install llvm cmake ninja -y
       - name: Expose libclang + cmake
         shell: pwsh
         run: |
