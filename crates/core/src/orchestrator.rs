@@ -1,5 +1,5 @@
 use std::sync::mpsc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use openflow_audio::{trim_silence, AudioEngine, Vad, SPEECH_THRESHOLD, TARGET_SAMPLE_RATE};
 use openflow_inject::Injector;
@@ -15,6 +15,15 @@ use crate::partial::PartialWorker;
 pub enum SessionEvent {
     HotkeyPressed,
     HotkeyReleased,
+    /// HUD pill clicked while idle: start dictating (design: Wispr's
+    /// "Click or hold <chord> to start dictating").
+    HudStart,
+    /// HUD stop button: finish the session and paste, exactly like a hotkey
+    /// release in Hold mode.
+    HudFinish,
+    /// HUD cancel button: throw the session away — no transcription, no
+    /// injection.
+    HudCancel,
     ConfigChanged(Box<Config>),
     Shutdown,
 }
@@ -43,6 +52,16 @@ enum State {
     Idle,
     Recording,
 }
+
+/// How often a hands-free recording checks for trailing silence.
+const HANDS_FREE_TICK: Duration = Duration::from_millis(200);
+/// Hands-free: this much continuous silence after speech ends the session.
+const HANDS_FREE_SILENCE_MS: u64 = 2_000;
+/// RMS analysis window for the silence detector (100 ms).
+const HANDS_FREE_WIN_MS: u64 = 100;
+/// A session must have heard at least this loud a window to count as speech;
+/// below it, hands-free keeps listening instead of auto-stopping on nothing.
+const HANDS_FREE_MIN_PEAK: f32 = 0.015;
 
 /// Rebuild hooks so config changes can swap hardware-bound services without
 /// tearing down the orchestrator. Factories live in the desktop shell (which
@@ -104,6 +123,9 @@ pub struct Orchestrator {
     /// Last text injected, used as the operand for commands when nothing is
     /// selected ("...and we'll ship Friday" then "make that professional").
     last_injection: Option<String>,
+    /// Loudest 100 ms RMS window heard this session; hands-free auto-stop
+    /// measures trailing silence relative to this.
+    session_peak: f32,
 }
 
 struct SessionContext {
@@ -148,6 +170,7 @@ impl Orchestrator {
                 session_opts: TranscribeOpts::default(),
                 session_context: None,
                 last_injection: None,
+                session_peak: 0.0,
             },
             OrchestratorHandle { tx },
         )
@@ -161,10 +184,47 @@ impl Orchestrator {
         }
         (self.callbacks.on_status)(Status::Idle);
 
-        while let Ok(event) = self.rx.recv() {
+        loop {
+            // Hands-free recording needs a heartbeat to notice trailing
+            // silence; every other state just blocks on the next event.
+            let event = if self.state == State::Recording
+                && self.config.hotkey.mode == HotkeyMode::HandsFree
+            {
+                match self.rx.recv_timeout(HANDS_FREE_TICK) {
+                    Ok(event) => event,
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        if self.hands_free_should_stop() {
+                            tracing::debug!("hands-free: trailing silence; finishing");
+                            self.finish_recording();
+                        }
+                        continue;
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+            } else {
+                match self.rx.recv() {
+                    Ok(event) => event,
+                    Err(_) => break,
+                }
+            };
             match event {
                 SessionEvent::HotkeyPressed => self.on_hotkey_pressed(),
                 SessionEvent::HotkeyReleased => self.on_hotkey_released(),
+                SessionEvent::HudStart => {
+                    if self.state == State::Idle {
+                        self.begin_recording();
+                    }
+                }
+                SessionEvent::HudFinish => {
+                    if self.state == State::Recording {
+                        self.finish_recording();
+                    }
+                }
+                SessionEvent::HudCancel => {
+                    if self.state == State::Recording {
+                        self.cancel_recording();
+                    }
+                }
                 SessionEvent::ConfigChanged(config) => self.apply_config(*config),
                 SessionEvent::Shutdown => break,
             }
@@ -205,8 +265,10 @@ impl Orchestrator {
     fn on_hotkey_pressed(&mut self) {
         match (self.state, self.config.hotkey.mode) {
             (State::Idle, _) => self.begin_recording(),
-            // Toggle mode: second press ends the session.
-            (State::Recording, HotkeyMode::Toggle) => self.finish_recording(),
+            // Toggle/hands-free: second press ends the session.
+            (State::Recording, HotkeyMode::Toggle | HotkeyMode::HandsFree) => {
+                self.finish_recording()
+            }
             // Hold mode: pressed while recording = autorepeat echo; ignore.
             (State::Recording, HotkeyMode::Hold) => {}
         }
@@ -225,7 +287,13 @@ impl Orchestrator {
             .audio
             .begin_session(self.config.audio.preroll_ms);
         if let Some(partials) = self.services.partials.as_ref() {
-            partials.start(self.services.audio.history_handle(), start);
+            // Captions must decode in the session language (build_opts runs
+            // later, after the context snapshot, so derive it here).
+            let language = match self.config.language.as_str() {
+                "auto" => None,
+                lang => Some(lang.to_string()),
+            };
+            partials.start(self.services.audio.history_handle(), start, language);
         }
         // Snapshot context at key-down, in parallel with the user speaking.
         self.session_context = self.services.context.as_ref().and_then(|provider| {
@@ -246,9 +314,67 @@ impl Orchestrator {
                 self.session_opts.clone(),
             );
         }
+        self.session_peak = 0.0;
         self.state = State::Recording;
         (self.callbacks.on_status)(Status::Recording);
         tracing::debug!("recording started");
+    }
+
+    /// Abort the current session: nothing is transcribed or injected.
+    fn cancel_recording(&mut self) {
+        self.state = State::Idle;
+        if let Some(partials) = self.services.partials.as_ref() {
+            partials.stop();
+        }
+        if let Some(finalizer) = self.services.finalizer.as_ref() {
+            // Fire-and-forget: `finish()` would block behind any in-flight
+            // chunk decode (which itself can queue behind the startup warm
+            // decode on the shared engine mutex) — a cancel must make the
+            // pill respond instantly no matter what the decoders are doing.
+            finalizer.cancel();
+        }
+        let _ = self.services.audio.end_session();
+        self.session_context = None;
+        (self.callbacks.on_status)(Status::Idle);
+        tracing::debug!("recording cancelled");
+    }
+
+    /// Hands-free endpointing: true once the session has heard real speech
+    /// and the trailing `HANDS_FREE_SILENCE_MS` were quiet relative to the
+    /// session's loudest window. Level-based (not VAD) so it stays cheap on
+    /// every tick and immune to Silero's recurrent-state ordering rules.
+    fn hands_free_should_stop(&mut self) -> bool {
+        let sr = TARGET_SAMPLE_RATE as u64;
+        let win = (sr * HANDS_FREE_WIN_MS / 1000) as usize;
+        let tail_windows = (HANDS_FREE_SILENCE_MS / HANDS_FREE_WIN_MS) as usize;
+        let tail = {
+            let history = self.services.audio.history_handle();
+            let h = history.lock().expect("history lock");
+            let head = h.head();
+            // Too little audio yet to have both speech and a full silence run.
+            if head.saturating_sub(self.session_start) < sr * (HANDS_FREE_SILENCE_MS + 500) / 1000 {
+                return false;
+            }
+            let from = self
+                .session_start
+                .max(head.saturating_sub(win as u64 * (tail_windows as u64 + 5)));
+            h.snapshot(from, head)
+        };
+        let levels: Vec<f32> = tail
+            .chunks(win)
+            .map(|c| (c.iter().map(|s| s * s).sum::<f32>() / c.len().max(1) as f32).sqrt())
+            .collect();
+        if let Some(max) = levels.iter().cloned().reduce(f32::max) {
+            self.session_peak = self.session_peak.max(max);
+        }
+        if self.session_peak < HANDS_FREE_MIN_PEAK {
+            return false; // nothing said yet — keep listening
+        }
+        let threshold = (self.session_peak * 0.15).max(0.006);
+        levels.len() >= tail_windows
+            && levels[levels.len() - tail_windows..]
+                .iter()
+                .all(|&l| l < threshold)
     }
 
     fn finish_recording(&mut self) {
@@ -292,8 +418,17 @@ impl Orchestrator {
             let (dict_terms, snippet_defs) = self.personalization();
 
             // Decode the remaining tail with the options built at key-down
-            // (same bias the chunk passes saw).
-            let opts = self.session_opts.clone();
+            // (same bias the chunk passes saw). When chunks already
+            // committed, reuse their pinned language (skips whisper's
+            // detection pass — a large slice of tail latency on auto-detect)
+            // and continue from their text instead of the bias prompt.
+            let mut opts = self.session_opts.clone();
+            if opts.language.is_none() {
+                opts.language = committed.language.clone();
+            }
+            if !committed.text.is_empty() {
+                opts.initial_prompt = Some(crate::finalizer::tail_chars(&committed.text, 120));
+            }
             let stt_started = Instant::now();
             let tail = match outcome {
                 Some(audio) => {
@@ -732,6 +867,117 @@ mod tests {
     }
 
     #[test]
+    fn mode_change_at_runtime_takes_effect_immediately() {
+        // Regression guard for "changing Mode in Settings does nothing":
+        // start in Hold, hot-swap the config to Toggle, and verify the very
+        // next session follows toggle semantics (release ignored, second
+        // press finishes).
+        let mut h = start_harness(HotkeyMode::Hold, FakeStt::with_responses(["switched"]));
+        let mut toggled = Config::default();
+        toggled.hotkey.mode = HotkeyMode::Toggle;
+        toggled.audio.preroll_ms = 0;
+        h.handle
+            .post(SessionEvent::ConfigChanged(Box::new(toggled)));
+
+        h.handle.post(SessionEvent::HotkeyPressed);
+        h.handle.post(SessionEvent::HotkeyReleased); // toggle: must be ignored
+        std::thread::sleep(Duration::from_millis(400));
+        h.handle.post(SessionEvent::HotkeyPressed); // toggle: finishes
+        h.shutdown();
+
+        assert_eq!(h.injected(), vec!["Switched. ".to_string()]);
+    }
+
+    #[test]
+    fn hands_free_auto_stops_after_trailing_silence() {
+        // One second of loud speech, then endless silence, paced at real
+        // time so the speech lands *inside* the session (a CPU-speed flood
+        // would exhaust the noise before the hotkey press arrives). In
+        // hands-free mode the orchestrator must finish on its own — no
+        // release, no second press.
+        let mut config = Config::default();
+        config.hotkey.mode = HotkeyMode::HandsFree;
+        config.audio.preroll_ms = 0;
+        let audio = AudioEngine::new(Box::new(
+            FakeAudioSource::new(one_second_of_noise()).realtime(true),
+        ));
+        let injector = FakeInjector::default();
+        let statuses = Arc::new(Mutex::new(Vec::new()));
+        let statuses2 = statuses.clone();
+        let (orch, handle) = Orchestrator::new(
+            Services {
+                audio,
+                stt: Arc::new(Mutex::new(
+                    Box::new(FakeStt::with_responses(["hands free works"])) as Box<dyn SttEngine>,
+                )),
+                vad: None,
+                injector: Box::new(injector.clone()),
+                partials: None,
+                finalizer: None,
+                stt_factory: None,
+                audio_factory: None,
+                cleanup: None,
+                store: None,
+                context: None,
+                terminal_injector: None,
+                commands: None,
+            },
+            config,
+            Callbacks {
+                on_status: Box::new(move |s| statuses2.lock().unwrap().push(s)),
+                on_timing: None,
+                on_assistant: None,
+                on_flash: None,
+            },
+        );
+        let thread = std::thread::spawn(move || orch.run());
+        handle.post(SessionEvent::HotkeyPressed);
+
+        // ~1 s of speech + 2 s silence hold + tick cadence: allow up to 10 s.
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while injector.injected.lock().unwrap().is_empty() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        handle.post(SessionEvent::Shutdown);
+        thread.join().unwrap();
+
+        assert_eq!(
+            injector.injected.lock().unwrap().clone(),
+            vec!["Hands free works. ".to_string()]
+        );
+        assert_eq!(*statuses.lock().unwrap().last().unwrap(), Status::Idle);
+    }
+
+    #[test]
+    fn hud_start_and_finish_dictate_like_a_hotkey() {
+        let mut h = start_harness(HotkeyMode::Hold, FakeStt::with_responses(["from the pill"]));
+        h.handle.post(SessionEvent::HudStart);
+        std::thread::sleep(Duration::from_millis(400));
+        h.handle.post(SessionEvent::HudFinish);
+        h.shutdown();
+
+        assert_eq!(h.injected(), vec!["From the pill. ".to_string()]);
+    }
+
+    #[test]
+    fn hud_cancel_discards_the_session() {
+        let mut h = start_harness(HotkeyMode::Hold, FakeStt::with_responses(["after cancel"]));
+        h.handle.post(SessionEvent::HudStart);
+        std::thread::sleep(Duration::from_millis(400));
+        h.handle.post(SessionEvent::HudCancel);
+        // The cancelled session reaches STT/injection zero times; a later
+        // dictation still works.
+        std::thread::sleep(Duration::from_millis(100));
+        h.handle.post(SessionEvent::HotkeyPressed);
+        std::thread::sleep(Duration::from_millis(400));
+        h.handle.post(SessionEvent::HotkeyReleased);
+        h.shutdown();
+
+        assert_eq!(h.injected(), vec!["After cancel. ".to_string()]);
+        assert!(h.timings.lock().unwrap().len() == 1);
+    }
+
+    #[test]
     fn too_short_utterance_is_skipped() {
         let mut h = start_harness(HotkeyMode::Hold, FakeStt::default());
         h.handle.post(SessionEvent::HotkeyPressed);
@@ -995,9 +1241,12 @@ mod tests {
             seed = seed
                 .wrapping_mul(6364136223846793005)
                 .wrapping_add(1442695040888963407);
-            match (seed >> 33) % 3 {
+            match (seed >> 33) % 6 {
                 0 => h.handle.post(SessionEvent::HotkeyPressed),
                 1 => h.handle.post(SessionEvent::HotkeyReleased),
+                2 => h.handle.post(SessionEvent::HudStart),
+                3 => h.handle.post(SessionEvent::HudFinish),
+                4 => h.handle.post(SessionEvent::HudCancel),
                 _ => h.handle.post(SessionEvent::ConfigChanged(Box::default())),
             }
         }

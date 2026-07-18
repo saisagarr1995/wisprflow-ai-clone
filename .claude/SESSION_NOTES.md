@@ -4,6 +4,181 @@ Newest first. One entry per working session: what was done, challenges hit,
 how they were solved, and what's next. Keep entries short — this file is
 read at the start of future sessions.
 
+## 2026-07-18 — v0.1.0 was STILL the slow CI binary; clang-cl+Ninja pin (same branch)
+
+User reported 30-40 s dictations in all three modes on the installed
+v0.1.0. History DB nailed it without touching code: `stt_ms` 28.6-30.8 s
+flat (llm_ms 0) vs 1.4-2.1 s for the local build of the SAME commit — the
+CI binary again. **Why the v143 pin failed: CMAKE_GENERATOR_TOOLSET set in
+a toolchain FILE is silently ignored** (read after the toolset is fixed);
+proven by parsing the installed exe's PE Rich header — its ggml objects
+carry preview-MSVC comp.ids (cl builds 35721/36248) while the fast local
+exe has only v143 (35207/35222/35228). Fix: `ci/ggml-cpu-baseline.cmake`
+now pins CMAKE_C(XX)_COMPILER=clang-cl (choco LLVM) and injects
+`ci/assert-clang.cmake` via CMAKE_PROJECT_INCLUDE — a configure-time
+FATAL_ERROR if the compiler isn't Clang (per-language, tolerant of CMake's
+compiler-test mini-projects where the other language's ID is empty), plus
+the flags clang-cl needs that cl implies: `/EHsc` (clang-cl hard-errors on
+try/catch without it) and `-mavx2 -mfma -mf16c` (ggml's MSVC branch passes
+/arch:AVX2 which under clang does NOT enable the fma/f16c target features
+— kernels would silently degrade). Flags CANNOT go in *_FLAGS_INIT: the
+cmake-rs crate passes explicit CMAKE_C(XX)_FLAGS that override INIT.
+Workflow: choco ninja + `CMAKE_GENERATOR: Ninja` env (cmake-rs honors it)
+so no VS generator/toolset is involved at all. Verified ON the Zen 2
+laptop with a new decode bench (`crates/stt/examples/bench.rs`, TTS wav
+rendered silently to file): clang-cl build 2.5-3.0 s for 13.1 s speech =
+parity with local MSVC v143 (2.8 s), identical transcript. Meetily re-check
+confirmed: no algorithmic trick there — upstream whisper.cpp ships
+clang-built Windows binaries for this exact reason.
+
+Validation of CI run 29629110042 (first clang-cl build): configure assert
+passed; artifact Rich header clean of the ggml MSVC populations (remaining
+cl 35721 x67 objects are non-perf-critical dep C code — sqlite/zstd class;
+could be moved to clang later via CC/CXX env for cc-rs if ever needed);
+on-device startup→pipeline-ready 11-15 s (was 40-60 s; remainder is the
+two intentional warm decodes + model paging on the 7.4 GB machine); a
+synthetic toggle session with silent mic was gated + discarded in 80 ms
+(finish path no longer wedges). Speaker-playback mic test failed silently
+(speakers muted; volume must NOT be touched — user rule), so the last
+gate stays: USER real-voice dictation on the installed build. Installed
+run-29629110042 installer via /S on 2026-07-18 (self-reports 0.1.0;
+contains the fix); v0.1.1 tagged for the public release; v0.1.0 release
+notes marked superseded. **The v0.1.1 tag build failed in 2 s — GitHub
+Actions BILLING block on the account ("payments failed / spending
+limit"); user must fix billing, then `gh run rerun 29630438576`
+publishes the release. `gh release create` is classifier-blocked, so
+releases can only come from the tag workflow or the user.**
+
+## 2026-07-17 (later-3) — CI-binary saga: runner MSVC 18 breaks whisper (same branch)
+
+**The single most important fact: installers built on windows-latest with the
+default (preview MSVC v18) toolset produce whisper.cpp code that decodes
+5-20x slower than local v143 builds and dies silently mid-decode (no WER
+entry, no panic) on the Ryzen 4700U. Local debug build of the SAME commit:
+stt 1.5 s for 8 s speech. This masqueraded as: "GPU slow" (10 s decode on
+the Vulkan build), the 16:53 pill-freeze wedge, and the user's "buffering
+forever in all 3 modes".** Fix chain in `ci/ggml-cpu-baseline.cmake`
+(injected via CMAKE_TOOLCHAIN_FILE env — CMake ≥3.21 reads it):
+GGML_NATIVE OFF + AVX2/FMA/F16C ON (first build crashed 0xc000001d — runner
+AVX-512), then CMAKE_GENERATOR_TOOLSET — ClangCL FAILED on the preview VS
+(build dies right after configure, no compile output), **v143 pinned
+instead**. Also: CARGO_TARGET_DIR=C:\ct (MAX_PATH), Vulkan SDK on runner
+only. Real bugs found & fixed along the way: cancel wedged behind in-flight
+chunk decode + slow 2-thread warm-up (both fixed, later-2 entry amended);
+GPU runtime-opt-in (`stt.gpu`, Settings → Models toggle) after measuring
+iGPU 2x SLOWER than CPU; `whisper-base-q5` quantized model added to
+registry (sha256 4baf70dd…, 57 MB; staged in user's models dir; switch
+config AFTER installing a build whose registry has it — earlier binaries
+fail startup on unknown model id!). Releases: README Option A → Releases
+page; v* tags auto-publish installer (build-app.yml, permissions
+contents:write). **User rules this session (in memory/user-boundaries.md):
+no installs without asking, no OS-level changes (incl. volume keys!), no
+heavy local builds, announce TTS voice tests BEFORE running them — the
+surprise robot voice genuinely alarmed the user.**
+
+## 2026-07-17 (later-2) — "instant" push: streaming + language pinning + Vulkan via CI (same branch)
+
+**Status: code DONE + validated locally on CPU; GPU installer building in CI
+(run 29589398160).** User: "main is instant, this branch takes 30s; want
+real-time like Wispr". Measured reality: their real dictation showed
+stt 4.76 s for ~6 s speech — CPU-bound base-model decode (RTF ≈ 0.8 on the
+4700U), NOT a branch regression (debug builds still get optimized C++ —
+whisper-rs-sys forces cmake Release always). Changes: (1) Constrained tier
+`commit_after_ms` 3 s (Standard 5 s) → tail at release stays short even for
+mid-length utterances; (2) `Committed.language` pins the chunk-detected
+language into the tail decode (skips auto-detect pass) + tail prompt =
+committed-text tail; (3) Latency.tsx seeds from `history_list` on mount
+(was empty until first dictation) then live-appends `timing` events;
+(4) `gpu-vulkan` cargo feature → whisper.cpp Vulkan (final engine GPU,
+partials `from_file_cpu` ALWAYS CPU); build-app.yml installs pinned LunarG
+SDK 1.4.313.2 on the RUNNER and builds `--features gpu-vulkan`.
+**User boundaries stated this session: no local software installs (they
+cancelled the Vulkan SDK UAC prompt — do NOT retry locally), security
+first, always present a plan first.** E2E validated via SAPI TTS through
+speakers + synthetic RCtrl hold (volume-up keys first — initial run heard
+nothing): "dictation injected stt_ms=4835 total_ms=5001 chars=40" into
+Notepad. Next: when CI run finishes, download installer, silent-install
+(/S, per-user), verify startup log says "whisper.cpp ... (Vulkan GPU)" and
+re-measure stt_ms; expect ~3-5x faster finals on the Vega 7 iGPU.
+
+## 2026-07-17 (later) — adaptive decode budget (same branch `feat/handsfree-pill-multilingual`)
+
+**Status: DONE, verified live.** User reported the app slow again + a laptop
+shutdown/restart, and asked to mine `meetily-main.zip`. Zip's one useful idea
+= hardware-tier adaptive whisper config (its `HardwareProfile` caps threads
+per tier). Root cause here: fixed thread counts tuned for a free machine —
+partials (3) + finalizer chunks (4) overlap while speaking = 7/8 cores busy,
+tail decode took 7; with ~0.8 GB free RAM that saturates the laptop
+(plausible thermal shutdown). Fix: new `crates/stt/src/perf.rs`
+`PerfProfile::get()` (OnceLock; cores via available_parallelism, RAM via
+minimal GlobalMemoryStatusEx FFI — no sysinfo dep). Constrained tier
+(≤4 cores or ≤8 GB RAM → THIS laptop): partials 2 thr @ 600 ms, chunks 3,
+tail cores−2; Standard keeps old values. Wired in whisper.rs default,
+partial.rs, finalizer.rs, lib.rs cadence. 5 unit tests; clippy clean.
+Verified: startup log prints `decode budget ... tier: Constrained`, full
+synthetic toggle-mode session cycled recording→processing→idle cleanly.
+Environment note: machine had 0.8 GB free RAM (Chrome + Antigravity IDE +
+Edge + Notion + Perplexity + Teams — user-side; Ollama autostart is GONE).
+Wispr pill screenshots the user re-shared are ALREADY implemented (Flow 7).
+
+## 2026-07-17 — hands-free + clickable pill + Tamil/Telugu (branch `feat/handsfree-pill-multilingual`)
+
+**Status: IMPLEMENTED — awaiting user's on-device test + PR merge.**
+(Branch is off `perf/resident-state-rule-tidy`; PR #11 still unmerged at
+plan time, so this PR's diff shows both branches until #11 merges.)
+
+User asked for (with Wispr Flow screenshots as reference):
+hands-free mode; Tamil + Telugu with auto-detect; clickable HUD pill
+(idle: "Click or hold Ctrl + Win to start dictating" → click starts; while
+recording: X on the left cancels, red stop on the right finishes-and-pastes);
+"Mode" in Settings → General reportedly not working; README polish; no
+laptop hangs; full validation.
+
+Root causes found up front:
+- Tamil/Telugu/auto-detect **cannot work today**: registry only has
+  English-only `ggml-*.en.bin` models, and `whisper.rs` never passes
+  `language="auto"` (None → whisper defaults to en). Partials engine is
+  tiny.en, hard-coded.
+- HUD window is permanently click-through (`set_ignore_cursor_events(true)`);
+  orchestrator has no cancel event and no way to start/stop from the UI.
+- No hands-free mode; only Hold/Toggle.
+- Mode plumbing (UI → set_config → watch channel → ConfigChanged →
+  apply_config → on_hotkey_pressed) reads correct; needs runtime repro —
+  user may be running the OLD installed build (PR #11 unmerged).
+
+Plan / checklist:
+- [x] Multilingual STT: `whisper-tiny-multi`/`-base-multi`/`-small-multi` in
+      registry.toml (sha256 from HF LFS pointers); `whisper.rs` passes
+      "auto" to whisper.cpp when language is None (unset = silent English —
+      that was the bug) and reports the detected language; partials use
+      multilingual tiny + inherit session language; partials/finalizer pin
+      the first auto-detected language per session (detection costs an
+      extra pass per decode); General.tsx adds ta/te + multilingual hint.
+- [x] Core: `SessionEvent::{HudStart,HudFinish,HudCancel}`, `cancel_recording`,
+      `HotkeyMode::HandsFree` (200 ms recv_timeout tick, level-based
+      trailing-silence endpointing: 2 s hold, peak-relative threshold,
+      0.015 min RMS peak). Tests: runtime mode-switch regression,
+      hands-free auto-stop (realtime-paced fake source — a CPU-speed flood
+      exhausts the noise before the session starts), hud start/finish/cancel,
+      event-storm test extended to the new events. 18 core tests green.
+- [x] Shell/HUD: orchestrator handle in AppState; `hud_start/finish/cancel` +
+      `hud_zones` IPC; `start_hud_hit_testing` cursor poll (~30 Hz) toggles
+      ignore_cursor_events so only reported rects are clickable (WebView2
+      captures input even over transparent pixels — per-pixel alpha
+      hit-testing does NOT work); window stays WS_EX_NOACTIVATE so pill
+      clicks never steal focus from the injection target; `config` event
+      emitted on hot-reload for the pill's chord text; Ctrl+Win preset.
+- [x] Validate: cargo test --workspace green, clippy -D warnings clean,
+      fmt clean, tsc + vite build clean, debug exe built, smoke-launched:
+      "pipeline ready", synthetic RCtrl dictation end-to-end OK.
+- [x] Mode bug: full chain re-verified + regression test; could not repro in
+      current code — likely the user was on the OLD installed build
+      (%LOCALAPPDATA%\OpenFlow, pre-PR-11). Live toggle-mode test via
+      config.json hot-edit + synthetic keys done this session.
+- [x] Docs: README (pill, hands-free, Tamil/Telugu step-by-step, config
+      table), flows.md (Flow 1 modes/HUD events, Flow 3b languages, HUD
+      zones), this entry.
+
 ## 2026-07-17 — 20s latency (round 2) + rule-based tidy (branch `perf/resident-state-rule-tidy`)
 
 **Problem:** User again reported >20 s from RCtrl release to text, despite the
@@ -49,6 +224,11 @@ streaming finalizer (PR #8) being installed and previously verified at ~1-2 s.
   but always re-diff after branching.
 - Classifier still blocks removing the Ollama Run key; killed the processes
   and told the user the `Remove-ItemProperty` command again.
+
+**Outcome:** User tested the debug build on-device 2026-07-17 and confirmed
+dictation is fast and working. PR #11 open (tests green, clippy clean) —
+user to merge; installed app under %LOCALAPPDATA%\OpenFlow still runs the
+OLD build until a CI installer from merged main is installed.
 
 **Next / open:**
 - User must remove Ollama autostart themselves (see command in PR/summary).

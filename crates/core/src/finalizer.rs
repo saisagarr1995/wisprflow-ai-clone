@@ -25,19 +25,20 @@ pub type SharedStt = Arc<Mutex<Box<dyn SttEngine>>>;
 pub struct Committed {
     pub text: String,
     pub until: u64,
+    /// Language pinned from the first auto-detected chunk, so the tail
+    /// decode skips whisper's per-decode detection pass.
+    pub language: Option<String>,
 }
 
 const SR: u64 = TARGET_SAMPLE_RATE as u64;
-/// Commit a chunk once at least this much undecoded audio is pending.
-const COMMIT_AFTER: u64 = 5 * SR;
 /// Never commit the freshest audio — the user is mid-word there.
 const HOLDBACK: u64 = SR * 12 / 10;
 /// The cut lands on the quietest 80 ms window inside the last second of the
 /// candidate chunk, so chunks end between words rather than through them.
 const CUT_SEARCH: u64 = SR;
-/// Chunk decodes share the machine with live captions and the foreground
-/// app; the release-time tail decode is the only pass that gets all cores.
-const CHUNK_THREADS: i32 = 4;
+// Chunk decodes share the machine with live captions and the foreground
+// app; their thread count comes from the hardware-adaptive PerfProfile so
+// overlapping passes never saturate a small laptop.
 
 struct Session {
     history: Arc<Mutex<RollingBuffer>>,
@@ -52,6 +53,9 @@ enum Cmd {
         opts: TranscribeOpts,
     },
     Finish(mpsc::Sender<Committed>),
+    /// Session cancelled: drop everything, no reply. Fire-and-forget so a
+    /// cancel NEVER blocks the orchestrator behind an in-flight decode.
+    Cancel,
     Shutdown,
 }
 
@@ -64,7 +68,10 @@ pub struct StreamFinalizer {
 }
 
 impl StreamFinalizer {
-    pub fn spawn(stt: SharedStt, interval: Duration) -> Self {
+    /// `commit_after` — commit a chunk once at least this much undecoded
+    /// audio is pending (hardware-adaptive; see `PerfProfile.commit_after_ms`).
+    pub fn spawn(stt: SharedStt, interval: Duration, commit_after: Duration) -> Self {
+        let commit_after = commit_after.as_millis() as u64 * SR / 1000;
         let (tx, rx) = mpsc::channel::<Cmd>();
         let thread = std::thread::Builder::new()
             .name("openflow-finalizer".into())
@@ -92,6 +99,7 @@ impl StreamFinalizer {
                                 committed: Committed {
                                     text: String::new(),
                                     until: from,
+                                    language: None,
                                 },
                             });
                             continue;
@@ -101,6 +109,10 @@ impl StreamFinalizer {
                             let _ = reply.send(out);
                             continue;
                         }
+                        Some(Cmd::Cancel) => {
+                            session = None;
+                            continue;
+                        }
                         Some(Cmd::Shutdown) => break,
                         None => {} // timeout tick — maybe commit below
                     }
@@ -108,7 +120,7 @@ impl StreamFinalizer {
                     let (chunk, cut) = {
                         let h = s.history.lock().expect("history lock");
                         let head = h.head();
-                        if head.saturating_sub(s.committed.until) < COMMIT_AFTER + HOLDBACK {
+                        if head.saturating_sub(s.committed.until) < commit_after + HOLDBACK {
                             continue;
                         }
                         let end = head - HOLDBACK;
@@ -116,7 +128,13 @@ impl StreamFinalizer {
                         let cut = end - CUT_SEARCH + quietest_offset(&search) as u64;
                         (h.snapshot(s.committed.until, cut), cut)
                     };
-                    if chunk.is_empty() {
+                    // Skip silent chunks entirely: whisper's encoder costs
+                    // the same for silence as for speech (fixed 30 s
+                    // window) and greedy decode on silence is its WORST
+                    // case (hallucination loops). Long hands-free pauses
+                    // used to burn 3 cores decoding nothing and pile up a
+                    // backlog the release then waited on.
+                    if chunk.is_empty() || is_silence(&chunk) {
                         s.committed.until = cut;
                         continue;
                     }
@@ -130,13 +148,24 @@ impl StreamFinalizer {
                     let opts = TranscribeOpts {
                         language: s.opts.language.clone(),
                         initial_prompt: prompt,
-                        threads: Some(CHUNK_THREADS),
+                        threads: Some(openflow_stt::PerfProfile::get().chunk_threads),
                     };
                     let result = stt.lock().expect("stt lock").transcribe(&chunk, &opts);
                     match result {
                         Ok(t) => {
                             let text = t.text.trim();
                             if !text.is_empty() {
+                                // Pin the first auto-detected language so
+                                // later chunks — and the release-time tail
+                                // decode — skip their extra detection pass.
+                                // Only from chunks with actual speech: on
+                                // silence, detection returns an arbitrary
+                                // language at ~1% confidence, and pinning
+                                // that would poison the whole session.
+                                if s.opts.language.is_none() {
+                                    s.opts.language = t.language.clone();
+                                    s.committed.language = t.language.clone();
+                                }
                                 if !s.committed.text.is_empty() {
                                     s.committed.text.push(' ');
                                 }
@@ -165,6 +194,13 @@ impl StreamFinalizer {
         });
     }
 
+    /// Abandon the session without waiting: any in-flight chunk decode is
+    /// discarded when the worker gets to the command. Used by cancel, which
+    /// must return to the event loop immediately.
+    pub fn cancel(&self) {
+        let _ = self.tx.send(Cmd::Cancel);
+    }
+
     /// Blocks until any in-flight chunk decode lands, then returns the
     /// committed text and where the tail decode should pick up.
     pub fn finish(&self) -> Committed {
@@ -183,6 +219,13 @@ impl Drop for StreamFinalizer {
             let _ = t.join();
         }
     }
+}
+
+/// No sample loud enough to plausibly be speech. Mic AGC puts speech peaks
+/// well above 0.05; 0.01 keeps even whisper-quiet speech while rejecting
+/// room tone.
+pub(crate) fn is_silence(audio: &[f32]) -> bool {
+    audio.iter().all(|s| s.abs() < 0.01)
 }
 
 /// Offset of the centre of the quietest 80 ms window in `region`.
@@ -205,7 +248,7 @@ fn quietest_offset(region: &[f32]) -> usize {
     best_at
 }
 
-fn tail_chars(text: &str, n: usize) -> String {
+pub(crate) fn tail_chars(text: &str, n: usize) -> String {
     let start = text
         .char_indices()
         .rev()
@@ -226,14 +269,14 @@ mod tests {
         history.lock().unwrap().push(&vec![0.4; 8 * SR as usize]);
 
         let stt: SharedStt = Arc::new(Mutex::new(Box::new(FakeStt::with_responses(["chunk one"]))));
-        let worker = StreamFinalizer::spawn(stt, Duration::from_millis(20));
+        let worker = StreamFinalizer::spawn(stt, Duration::from_millis(20), Duration::from_secs(5));
         worker.start(history.clone(), 0, TranscribeOpts::default());
         std::thread::sleep(Duration::from_millis(300));
 
         let committed = worker.finish();
         assert_eq!(committed.text, "chunk one");
         // The cut is behind the head by at least the holdback.
-        assert!(committed.until >= COMMIT_AFTER);
+        assert!(committed.until >= 5 * SR);
         assert!(committed.until <= 8 * SR - HOLDBACK);
         drop(worker); // must join, not hang
     }
@@ -244,10 +287,44 @@ mod tests {
         history.lock().unwrap().push(&vec![0.4; SR as usize]); // 1 s: below threshold
 
         let stt: SharedStt = Arc::new(Mutex::new(Box::new(FakeStt::with_responses(["nope"]))));
-        let worker = StreamFinalizer::spawn(stt, Duration::from_millis(20));
+        let worker = StreamFinalizer::spawn(stt, Duration::from_millis(20), Duration::from_secs(5));
         worker.start(history, 0, TranscribeOpts::default());
         std::thread::sleep(Duration::from_millis(120));
 
+        let committed = worker.finish();
+        assert_eq!(committed.text, "");
+        assert_eq!(committed.until, 0);
+    }
+
+    #[test]
+    fn silent_chunks_are_committed_without_decoding() {
+        let history = Arc::new(Mutex::new(RollingBuffer::new(30 * SR as usize)));
+        history.lock().unwrap().push(&vec![0.001; 8 * SR as usize]); // room tone
+
+        let stt: SharedStt = Arc::new(Mutex::new(Box::new(FakeStt::with_responses([
+            "must never appear",
+        ]))));
+        let worker = StreamFinalizer::spawn(stt, Duration::from_millis(20), Duration::from_secs(5));
+        worker.start(history, 0, TranscribeOpts::default());
+        std::thread::sleep(Duration::from_millis(200));
+
+        let committed = worker.finish();
+        assert_eq!(committed.text, "");
+        // The cut still advanced: silence is consumed, just not decoded.
+        assert!(committed.until >= 5 * SR);
+    }
+
+    #[test]
+    fn cancel_discards_session_without_reply() {
+        let history = Arc::new(Mutex::new(RollingBuffer::new(30 * SR as usize)));
+        history.lock().unwrap().push(&vec![0.4; 8 * SR as usize]);
+
+        let stt: SharedStt = Arc::new(Mutex::new(Box::new(FakeStt::with_responses(["chunk"]))));
+        let worker = StreamFinalizer::spawn(stt, Duration::from_millis(20), Duration::from_secs(5));
+        worker.start(history, 0, TranscribeOpts::default());
+        std::thread::sleep(Duration::from_millis(100));
+
+        worker.cancel(); // must not block
         let committed = worker.finish();
         assert_eq!(committed.text, "");
         assert_eq!(committed.until, 0);

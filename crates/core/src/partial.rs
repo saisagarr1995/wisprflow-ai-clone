@@ -15,6 +15,9 @@ pub enum PartialCmd {
     Start {
         history: Arc<Mutex<RollingBuffer>>,
         from: u64,
+        /// Session language ("ta", "te"...); `None` = auto-detect. Captions
+        /// must decode in the same language as the final pass.
+        language: Option<String>,
     },
     Stop,
     Shutdown,
@@ -38,7 +41,7 @@ impl PartialWorker {
         let thread = std::thread::Builder::new()
             .name("openflow-partials".into())
             .spawn(move || {
-                let mut active: Option<(Arc<Mutex<RollingBuffer>>, u64)> = None;
+                let mut active: Option<(Arc<Mutex<RollingBuffer>>, u64, Option<String>)> = None;
                 loop {
                     // Idle: block. Active: poll so we can decode between commands.
                     let cmd = if active.is_none() {
@@ -51,8 +54,12 @@ impl PartialWorker {
                         }
                     };
                     match cmd {
-                        Some(PartialCmd::Start { history, from }) => {
-                            active = Some((history, from));
+                        Some(PartialCmd::Start {
+                            history,
+                            from,
+                            language,
+                        }) => {
+                            active = Some((history, from, language));
                             continue;
                         }
                         Some(PartialCmd::Stop) => {
@@ -62,7 +69,7 @@ impl PartialWorker {
                         Some(PartialCmd::Shutdown) => break,
                         None => {} // timeout tick — decode below
                     }
-                    if let Some((history, from)) = active.as_ref() {
+                    if let Some((history, from, language)) = active.as_mut() {
                         let audio = {
                             let h = history.lock().expect("history lock");
                             let head = h.head();
@@ -74,19 +81,37 @@ impl PartialWorker {
                             let start = (*from).max(head.saturating_sub(window));
                             h.snapshot(start, head)
                         };
-                        // Skip until there's half a second to say anything about.
-                        if audio.len() < TARGET_SAMPLE_RATE as usize / 2 {
+                        // Skip until there's half a second to say anything
+                        // about, and skip silent windows outright — decoding
+                        // silence costs a full encoder pass (plus a language
+                        // detection pass on auto) to caption nothing.
+                        if audio.len() < TARGET_SAMPLE_RATE as usize / 2
+                            || crate::finalizer::is_silence(&audio)
+                        {
                             continue;
                         }
                         // Few threads: captions are a nicety; they must never
                         // starve the final pass, the UI, or other apps.
                         let opts = TranscribeOpts {
-                            threads: Some(3),
+                            language: language.clone(),
+                            threads: Some(openflow_stt::PerfProfile::get().partial_threads),
                             ..TranscribeOpts::default()
                         };
                         match stt.transcribe(&audio, &opts) {
-                            Ok(t) if !t.text.trim().is_empty() => on_partial(t.text),
-                            Ok(_) => {}
+                            Ok(t) => {
+                                // Auto-detect runs an extra pass per decode;
+                                // pin the first detection for the rest of the
+                                // session so later ticks skip it. Only from
+                                // ticks that heard actual speech — detection
+                                // on silence returns an arbitrary language at
+                                // ~1% confidence.
+                                if !t.text.trim().is_empty() {
+                                    if language.is_none() {
+                                        *language = t.language.clone();
+                                    }
+                                    on_partial(t.text);
+                                }
+                            }
                             Err(e) => tracing::debug!(error = %e, "partial decode failed"),
                         }
                     }
@@ -99,8 +124,12 @@ impl PartialWorker {
         }
     }
 
-    pub fn start(&self, history: Arc<Mutex<RollingBuffer>>, from: u64) {
-        let _ = self.tx.send(PartialCmd::Start { history, from });
+    pub fn start(&self, history: Arc<Mutex<RollingBuffer>>, from: u64, language: Option<String>) {
+        let _ = self.tx.send(PartialCmd::Start {
+            history,
+            from,
+            language,
+        });
     }
 
     pub fn stop(&self) {
@@ -136,7 +165,7 @@ mod tests {
             Duration::from_millis(30),
         );
 
-        worker.start(history.clone(), 0);
+        worker.start(history.clone(), 0, None);
         let first = prx
             .recv_timeout(Duration::from_secs(2))
             .expect("first partial");

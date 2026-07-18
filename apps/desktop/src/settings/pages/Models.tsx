@@ -90,6 +90,15 @@ export default function Models({
             </Row>
           );
         })}
+        <Row
+          label="GPU transcription"
+          hint="Decode on the graphics card (Vulkan). Faster on discrete GPUs; integrated laptop GPUs are usually SLOWER than the CPU — leave off unless you measure a win. Takes effect on restart."
+        >
+          <Toggle
+            value={config.stt.gpu}
+            onChange={(v) => update((c) => void (c.stt.gpu = v))}
+          />
+        </Row>
       </Section>
 
       <Section title="AI cleanup (Ollama)">

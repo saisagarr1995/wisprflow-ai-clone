@@ -10,5 +10,11 @@ whisper-rs = "0.16"
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
+[features]
+# Decode on the GPU via Vulkan (any vendor — AMD iGPUs included). Build
+# needs the LunarG Vulkan SDK; at runtime whisper.cpp falls back to CPU
+# when no usable device exists. Partials stay on CPU either way.
+gpu-vulkan = ["whisper-rs/vulkan"]
+
 [dev-dependencies]
 hound = "3.5"

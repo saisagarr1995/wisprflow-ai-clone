@@ -7,7 +7,21 @@ changes** (new pipeline stage, changed timing knob, new event).
 
 ## Flow 1 — Push-to-talk dictation (the core flow)
 
-Hotkey (default RCtrl) held → speak → release → text appears in focused app.
+Hotkey (default RCtrl; presets incl. Ctrl+Win) held → speak → release → text
+appears in focused app. Three hotkey modes (config `hotkey.mode`, applied
+live via ConfigChanged): **hold** (release finishes), **toggle** (second
+press finishes), **hands_free** (auto-finishes after ~2 s of trailing
+silence — level-based endpointing in `Orchestrator::hands_free_should_stop`,
+driven by a 200 ms `recv_timeout` tick in `run`; a second press also stops).
+The HUD pill can drive the same session with the mouse:
+`SessionEvent::{HudStart,HudFinish,HudCancel}` posted from
+`commands.rs::hud_start/hud_finish/hud_cancel` (pill click / stop button /
+X button). Cancel (`cancel_recording`) discards everything — no STT, no
+injection — and is FIRE-AND-FORGET (`StreamFinalizer::cancel`): it must
+never wait on an in-flight chunk decode, which can queue behind the startup
+warm decode on the shared engine mutex (that wedge froze the pill for a
+minute on a slow build; warm_up now also uses the full tail thread budget,
+not 2 threads).
 
 ```
 key event (any key on system)
@@ -42,12 +56,14 @@ Per-stage timings are RECORDED for every dictation: `DictationTiming {audio_ms, 
 
 | Symptom | Likely stage | Where to look |
 |---|---|---|
+| stt_ms ~30 s FLAT (even 2 s utterances) on an INSTALLED build while a local build of the same commit is fast | CI-compiled whisper binary: runner's preview MSVC emits 5-20x slower kernels (shipped in v0.1.0). ggml is now pinned to clang-cl + Ninja with a configure-time assert; if it recurs, check the exe's Rich header for preview-MSVC object builds | `ci/ggml-cpu-baseline.cmake`, `ci/assert-clang.cmake`, build-app.yml; history DB timings prove it (`SELECT stt_ms FROM history`) |
 | ALL decodes slow on a low-RAM machine (~20s finals) | Memory pressure: check free RAM + whether Ollama autostarted (`HKCU:...\Run` key). Whisper decode state is allocated ONCE per engine and reused (`whisper.rs`); if that regresses to per-call `create_state`, page-fault storms return | `crates/stt/src/whisper.rs`; Task Manager |
 | Slow only on FIRST dictation after launch | Cold model pages (engines are warm-decoded at startup — `warm_up` in `lib.rs`/`whisper.rs`) or Ollama cold model load | shell init in `lib.rs`; `ollama.rs` (60s request timeout) |
 | `llm_ms` dominates | Ollama slow/cold/wrong model | `crates/llm/src/ollama.rs`, `cleanup.rs`; `ollama-setup` skill |
 | `stt_ms` dominates and grows with utterance length | StreamFinalizer not running (finalizer=None) or chunks not committing | `crates/core/src/finalizer.rs` (COMMIT_AFTER=5s, HOLDBACK=1.2s, CHUNK_THREADS=4, 400ms poll) |
 | `stt_ms` high but flat | Model too big for CPU / thread config | `crates/stt/src/whisper.rs`; model choice in Settings → Models |
 | Delay before recording even starts | hotkey hook or audio device init | `windows_hook.rs`, `crates/audio/src/engine.rs` |
+| Whole SYSTEM sluggish while speaking (or thermal shutdown) | decode threads oversubscribing the CPU — check the "decode budget" startup log line matches the machine tier | `crates/stt/src/perf.rs` |
 | Whole app frozen | orchestrator loop blocked (it is single-threaded) | `orchestrator.rs` — anything slow inside `finish_recording` blocks next dictation |
 | Injection lands in wrong app / nothing appears | focus-abort triggered or injector failed | orchestrator.rs focus re-check; `crates/inject/src/win_*.rs` |
 | Ollama down entirely | 3s connect timeout → falls back to raw text (still works, just no cleanup) | `ollama.rs:38` |
@@ -59,7 +75,18 @@ Same capture as Flow 1 through STT; then `try_run_command` (orchestrator.rs:496)
 
 ## Flow 3 — Live captions (partials)
 
-`PartialWorker` (crates/core/src/partial.rs): own thread + own SMALL stt engine, re-decodes session-so-far every **350 ms** (lib.rs:263), capped at 3 threads. Emits to HUD (Hud.tsx) only — nothing downstream consumes partials; final pass is authoritative.
+`PartialWorker` (crates/core/src/partial.rs): own thread + own SMALL stt engine (**whisper-tiny-multi**, multilingual), re-decodes a sliding 5 s window every **350 ms**, capped at 3 threads. Receives the session language from the orchestrator; with auto-detect it pins the first detected language for the rest of the session (detection costs an extra pass per decode). Emits to HUD (Hud.tsx) only — nothing downstream consumes partials; final pass is authoritative.
+
+## Flow 3b — Languages (Tamil/Telugu/auto-detect)
+
+Config `language` ("auto" | "en" | "ta" | "te" | …) → `build_opts` →
+`TranscribeOpts.language` (None = auto). `whisper.rs` passes "auto" to
+whisper.cpp when None (an unset language silently decodes English — the old
+bug) and reports the detected language in `Transcript.language`. Non-English
+NEEDS a multilingual model (`whisper-*-multi` in registry.toml); the default
+`whisper-base` is ggml-base.EN. Finalizer chunks pin the first detected
+language like partials do. General.tsx shows a hint when a non-English
+language is picked.
 
 ## Flow 4 — Streaming finalizer (why long dictations finish fast)
 
@@ -75,7 +102,7 @@ Settings → Models page → `download_model` / `list_models` IPC → `openflow-
 
 ## Flow 7 — UI surfaces & events (shell, no logic)
 
-- HUD (Hud.tsx): status Idle/Recording/Processing + live partials + mic level (`get_level`, 66 ms poll in lib.rs:363–364).
+- HUD (Hud.tsx): status Idle/Recording/Processing + live partials + mic level (`get_level`, 66 ms poll in lib.rs). Clickable Wispr-style pill: idle handle hover-expands to "Click or hold <chord> to start dictating" (chord from `get_config` + live `config` event); recording pill has ✕ (cancel) and red stop (finish-and-paste) buttons. The window stays WS_EX_NOACTIVATE (clicks never steal focus, so injection still targets the user's app); selective click-through = frontend reports clickable rects via `hud_zones` IPC, `start_hud_hit_testing` (lib.rs) polls the cursor at ~30 Hz and toggles `set_ignore_cursor_events`.
 - Settings (Settings.tsx + pages/): all data via IPC commands in commands.rs — thin wrappers over crates.
 - Assistant (Assistant.tsx): popover answers from Flow 2.
 - Tray: status icon; opens Settings.
@@ -84,10 +111,12 @@ Settings → Models page → `download_model` / `list_models` IPC → `openflow-
 
 | Knob | Value | Where |
 |---|---|---|
-| Hotkey | RCtrl (Hold mode; Toggle available) | settings schema |
-| Partial re-decode interval | 350 ms | lib.rs:263 |
+| Hotkey | RCtrl (Hold mode; Toggle + HandsFree available) | settings schema |
+| Hands-free tick / silence hold / min peak | 200 ms / 2 s / 0.015 RMS | orchestrator.rs consts |
+| Decode budget (partial interval/threads, chunk threads, tail threads, commit-after) | ADAPTIVE via `PerfProfile::get()` — Constrained (≤4 cores or ≤8 GB RAM): 600 ms / 2 / 3 / cores−2 / 3 s; Standard: 350 ms / 3 / 4 / cores−1 / 5 s | `crates/stt/src/perf.rs` (Meetily-style tiers; logged at startup as "decode budget") |
+| GPU STT | opt-in `gpu-vulkan` cargo feature (whisper.cpp Vulkan; CI installs LunarG SDK on the runner and release builds ship with it; local dev builds are CPU unless the SDK is installed). Final engine GPU, partials engine ALWAYS CPU (`from_file_cpu`) so captions never contend. Startup log "final stt engine" shows the backend | `crates/stt/src/whisper.rs`, `.github/workflows/build-app.yml` |
+| Tail decode language | pinned from first finalizer chunk (`Committed.language`) when config = auto, skipping whisper's per-decode detection pass; tail prompt = committed-text tail for continuity | orchestrator.rs `finish_recording` |
 | Finalizer poll / commit threshold / holdback | 400 ms / 5 s / 1.2 s | finalizer.rs consts |
-| Chunk decode threads / final tail threads | 4 / all-but-one cores | finalizer.rs / whisper.rs |
 | Min utterance | 300 ms | orchestrator.rs:282 |
 | Ollama connect / request timeout | 3 s / 60 s | ollama.rs |
 | Trailing space after dictation | yes (not after identifiers) | orchestrator.rs:407 |

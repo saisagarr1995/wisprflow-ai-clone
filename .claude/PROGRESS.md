@@ -35,6 +35,15 @@ Tracks position in [docs/FABLE5_PROMPT_PLAN.md](../docs/FABLE5_PROMPT_PLAN.md). 
 | 29 | Linux parity | ⏭ deferred | Same trait boundary; X11/Wayland backends next. |
 | 30 | Release engineering | ✅ partial | NSIS/MSI/dmg/appimage/deb bundle config, MIT LICENSE, no-telemetry test, docs. Signing + auto-updater need keys (updater shipped disabled). Onboarding wizard = roadmap. |
 
+## Post-plan feature rounds
+
+Work after the 30-prompt plan is tracked per session in [SESSION_NOTES.md](SESSION_NOTES.md).
+
+| Date | Branch | What |
+|---|---|---|
+| 2026-07-17 | `perf/resident-state-rule-tidy` (PR #11) | Resident whisper state, engine warm-up, deterministic tidy |
+| 2026-07-17 | `feat/handsfree-pill-multilingual` | Hands-free mode (silence auto-stop), clickable HUD pill (start/✕ cancel/stop finish-and-paste), multilingual models + Tamil/Telugu + auto-detect, mode-change regression test |
+
 ## Machine notes
 - Dev machine: Windows 11, Rust stable (MSVC), Node 22. VS Build Tools 2022 installed 2026-07-04.
 - Build from PowerShell, not Git Bash (Git Bash's coreutils `link` shadows the MSVC linker).

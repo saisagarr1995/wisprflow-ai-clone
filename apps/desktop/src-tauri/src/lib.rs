@@ -79,6 +79,8 @@ pub fn run() {
         store,
         level_slot: Arc::new(Mutex::new(None)),
         status: Arc::new(AtomicU8::new(0)),
+        orchestrator: Arc::new(Mutex::new(None)),
+        hud_zones: Arc::new(Mutex::new(Vec::new())),
     };
 
     tauri::Builder::default()
@@ -96,6 +98,10 @@ pub fn run() {
             commands::get_config,
             commands::ui_log,
             commands::set_config,
+            commands::hud_start,
+            commands::hud_finish,
+            commands::hud_cancel,
+            commands::hud_zones,
             commands::list_devices,
             commands::get_level,
             commands::list_models,
@@ -155,10 +161,18 @@ pub fn run() {
             // Critical: the HUD must never take foreground focus. If it did, the
             // orchestrator would see the focused app change to OpenFlow and
             // abort injection (design doc §7). WS_EX_NOACTIVATE keeps it from
-            // ever becoming the active window, even when shown.
+            // ever becoming the active window, even when shown — so clicking
+            // the pill leaves the user's app focused and injection still lands
+            // in the right window.
             make_non_activating(&hud);
             position_hud_bottom_center(&hud);
             let _ = hud.show();
+            // Selective click-through: the window ignores the mouse except
+            // when the cursor is over a zone the HUD frontend declared
+            // clickable (idle pill, cancel/finish buttons). WebView2 captures
+            // input over transparent pixels too, so this poll is the only way
+            // to keep the rest of the overlay transparent to clicks.
+            start_hud_hit_testing(hud.clone(), app.state::<AppState>().hud_zones.clone());
 
             // The main window starts hidden (tray app). Show it once on first
             // run so a new user discovers the app; afterwards it lives quietly
@@ -222,20 +236,33 @@ fn bootstrap_pipeline(
             engine
         })
     };
-    let stt_factory: openflow_core::SttFactory = Box::new(|model_id: &str| {
-        let path = openflow_models::ensure(model_id, |_| {}).map_err(|e| e.to_string())?;
-        openflow_stt::WhisperEngine::from_file(&path)
-            .map(|e| Box::new(e) as Box<dyn openflow_stt::SttEngine>)
-            .map_err(|e| e.to_string())
-    });
+    let stt_factory: openflow_core::SttFactory = {
+        let use_gpu = config.stt.gpu;
+        Box::new(move |model_id: &str| {
+            let path = openflow_models::ensure(model_id, |_| {}).map_err(|e| e.to_string())?;
+            let engine = if use_gpu {
+                openflow_stt::WhisperEngine::from_file_gpu(&path)
+            } else {
+                openflow_stt::WhisperEngine::from_file(&path)
+            };
+            engine
+                .map(|e| Box::new(e) as Box<dyn openflow_stt::SttEngine>)
+                .map_err(|e| e.to_string())
+        })
+    };
 
     // Shared with the streaming finalizer inside the orchestrator, which
     // commits chunks of the utterance while the user is still speaking.
     let stt: openflow_core::SharedStt =
         std::sync::Arc::new(std::sync::Mutex::new(stt_factory(&config.stt.model_id)?));
+    tracing::info!(
+        engine = %stt.lock().expect("stt lock").describe(),
+        "final stt engine"
+    );
     let finalizer = Some(openflow_core::StreamFinalizer::spawn(
         stt.clone(),
         std::time::Duration::from_millis(400),
+        std::time::Duration::from_millis(openflow_stt::PerfProfile::get().commit_after_ms),
     ));
     // Warm the final engine off the latency path: the first dictation after
     // launch used to pay for lazy buffer init + cold weight pages. A real
@@ -259,8 +286,10 @@ fn bootstrap_pipeline(
         }
     };
 
-    // Partials always use tiny (fast) regardless of the main model.
-    let partials = match openflow_models::ensure("whisper-tiny", |_| {})
+    // Partials always use tiny (fast) regardless of the main model — the
+    // multilingual variant, so live captions follow the session language
+    // (Tamil/Telugu/auto) instead of force-decoding English.
+    let partials = match openflow_models::ensure("whisper-tiny-multi", |_| {})
         .map_err(|e| e.to_string())
         .and_then(|p| openflow_stt::WhisperEngine::from_file(&p).map_err(|e| e.to_string()))
     {
@@ -272,7 +301,11 @@ fn bootstrap_pipeline(
                 Box::new(move |text| {
                     let _ = partial_app.emit("partial", text);
                 }),
-                std::time::Duration::from_millis(350),
+                // Caption cadence adapts to the machine: constrained laptops
+                // re-decode less often so the system stays responsive.
+                std::time::Duration::from_millis(
+                    openflow_stt::PerfProfile::get().partial_interval_ms,
+                ),
             ))
         }
         Err(e) => {
@@ -387,15 +420,23 @@ fn bootstrap_pipeline(
             .map_err(|e| e.to_string())?;
     }
 
+    // Let the HUD post start/finish/cancel events (pill clicks).
+    *app.state::<AppState>()
+        .orchestrator
+        .lock()
+        .expect("orchestrator slot") = Some(handle.clone());
+
     // Hotkey hook → orchestrator bridge, rebuilt when the chord changes.
     let listener_slot: Arc<Mutex<Option<openflow_hotkey::HotkeyListener>>> =
         Arc::new(Mutex::new(None));
     start_hotkey(&config.hotkey.chord, handle.clone(), &listener_slot)?;
 
-    // Config hot-reload → orchestrator + hotkey rebuild.
+    // Config hot-reload → orchestrator + hotkey rebuild + UI notification
+    // (the HUD shows the current chord in its idle pill).
     {
         let config_handle = handle.clone();
         let listener_slot = listener_slot.clone();
+        let config_app = app.clone();
         let mut last_chord = config.hotkey.chord.clone();
         tauri::async_runtime::spawn(async move {
             while config_rx.changed().await.is_ok() {
@@ -407,6 +448,7 @@ fn bootstrap_pipeline(
                         Err(e) => tracing::error!(error = %e, "hotkey rebind failed"),
                     }
                 }
+                let _ = config_app.emit("config", &updated);
                 config_handle.post(SessionEvent::ConfigChanged(Box::new(updated)));
             }
         });
@@ -466,6 +508,45 @@ fn tooltip_for(s: Status) -> &'static str {
         Status::Processing => "OpenFlow — transcribing…",
     }
 }
+
+/// Poll the cursor (~30 Hz) and flip the HUD's click-through flag so only the
+/// frontend-declared zones accept the mouse. Zone coords are logical px
+/// relative to the window; the cursor is physical screen px.
+#[cfg(windows)]
+fn start_hud_hit_testing(hud: tauri::WebviewWindow, zones: Arc<Mutex<Vec<commands::HudZone>>>) {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+    let _ = std::thread::Builder::new()
+        .name("openflow-hud-hittest".into())
+        .spawn(move || {
+            let mut interactive = false;
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(33));
+                let zones = zones.lock().expect("hud zones").clone();
+                let mut hit = false;
+                if !zones.is_empty() {
+                    let mut cursor = POINT::default();
+                    if unsafe { GetCursorPos(&mut cursor) }.is_ok() {
+                        if let Ok(pos) = hud.outer_position() {
+                            let scale = hud.scale_factor().unwrap_or(1.0);
+                            let x = (cursor.x - pos.x) as f64 / scale;
+                            let y = (cursor.y - pos.y) as f64 / scale;
+                            hit = zones.iter().any(|z| {
+                                x >= z.x && x <= z.x + z.width && y >= z.y && y <= z.y + z.height
+                            });
+                        }
+                    }
+                }
+                if hit != interactive {
+                    interactive = hit;
+                    let _ = hud.set_ignore_cursor_events(!interactive);
+                }
+            }
+        });
+}
+
+#[cfg(not(windows))]
+fn start_hud_hit_testing(_hud: tauri::WebviewWindow, _zones: Arc<Mutex<Vec<commands::HudZone>>>) {}
 
 /// Apply `WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW` so the window can never steal
 /// foreground focus (and stays out of Alt-Tab). Used for the HUD overlay.

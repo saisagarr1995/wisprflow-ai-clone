@@ -18,11 +18,29 @@ pub struct WhisperEngine {
     /// the model context alive via its internal Arc.
     state: WhisperState,
     model_name: String,
+    /// Whether this engine was created with GPU offload enabled (only
+    /// possible under the `gpu-vulkan` feature).
+    gpu: bool,
 }
 
 impl WhisperEngine {
+    /// CPU engine — the default. Even in `gpu-vulkan` builds the GPU is
+    /// opt-in per config: iGPUs without matrix cores decode whisper slower
+    /// than the CPU, so shipping GPU-on-by-default would regress laptops.
     pub fn from_file(model_path: &Path) -> Result<Self, SttError> {
-        let params = WhisperContextParameters::default();
+        Self::new(model_path, false)
+    }
+
+    /// GPU-offloaded engine (config `stt.gpu`). Only effective in builds
+    /// with the `gpu-vulkan` feature; whisper.cpp falls back to CPU (with a
+    /// "no GPU found" log) when no usable device exists.
+    pub fn from_file_gpu(model_path: &Path) -> Result<Self, SttError> {
+        Self::new(model_path, true)
+    }
+
+    fn new(model_path: &Path, use_gpu: bool) -> Result<Self, SttError> {
+        let mut params = WhisperContextParameters::default();
+        params.use_gpu(use_gpu);
         let context = WhisperContext::new_with_params(
             model_path
                 .to_str()
@@ -38,18 +56,23 @@ impl WhisperEngine {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "unknown".into());
         drop(context); // state's internal Arc keeps the model alive
-        Ok(Self { state, model_name })
+        Ok(Self {
+            state,
+            model_name,
+            gpu: use_gpu && cfg!(feature = "gpu-vulkan"),
+        })
     }
 }
 
 impl SttEngine for WhisperEngine {
     fn transcribe(&mut self, audio: &[f32], opts: &TranscribeOpts) -> Result<Transcript, SttError> {
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        // whisper.cpp defaults to min(4, cores), leaving half of an 8-core
-        // CPU idle for the latency-critical final pass.
-        let threads = opts.threads.unwrap_or_else(|| {
-            (std::thread::available_parallelism().map_or(4, |n| n.get() as i32) - 1).max(2)
-        });
+        // whisper.cpp defaults to min(4, cores); the hardware-adaptive budget
+        // gives the latency-critical final pass more on big machines while
+        // leaving constrained laptops headroom for the OS.
+        let threads = opts
+            .threads
+            .unwrap_or_else(|| crate::PerfProfile::get().tail_threads);
         params.set_n_threads(threads);
         params.set_translate(false);
         params.set_print_progress(false);
@@ -64,9 +87,11 @@ impl SttEngine for WhisperEngine {
         // fallback ladder can multiply latency ~5x on hard audio, and
         // dictation always prefers the fast greedy pass.
         params.set_temperature_inc(0.0);
-        if let Some(lang) = opts.language.as_deref() {
-            params.set_language(Some(lang));
-        }
+        // `None` = auto-detect. whisper.cpp only detects when the language is
+        // explicitly "auto"; leaving it unset silently decodes as English,
+        // which broke every non-English dictation. English-only models
+        // (ggml-*.en) ignore this and always produce English.
+        params.set_language(Some(opts.language.as_deref().unwrap_or("auto")));
         if let Some(prompt) = opts.initial_prompt.as_deref() {
             params.set_initial_prompt(prompt);
         }
@@ -83,24 +108,35 @@ impl SttEngine for WhisperEngine {
             text.push_str(&piece);
         }
 
+        // Report what was actually decoded: the forced language, or whatever
+        // auto-detection picked on a multilingual model.
+        let language = match opts.language.clone() {
+            Some(lang) => Some(lang),
+            None => {
+                whisper_rs::get_lang_str(self.state.full_lang_id_from_state()).map(str::to_string)
+            }
+        };
+
         Ok(Transcript {
             text: strip_annotations(&text),
-            language: opts.language.clone(),
+            language,
         })
     }
 
     fn describe(&self) -> String {
-        format!("whisper.cpp {} (CPU)", self.model_name)
+        let backend = if self.gpu { "Vulkan GPU" } else { "CPU" };
+        format!("whisper.cpp {} ({backend})", self.model_name)
     }
 
     /// A real decode over half a second of silence pages in the weights and
     /// initializes mel/compute scratch, so the first dictation is not cold.
     fn warm_up(&mut self) {
+        // Full tail budget: the warm decode holds the SHARED engine mutex,
+        // and a dictation started early queues its chunk decodes (and a
+        // blocking cancel) behind it — on 2 threads that wedged the app for
+        // the better part of a minute on slower builds.
         let silence = vec![0.0f32; 8_000]; // 0.5 s at 16 kHz
-        let opts = TranscribeOpts {
-            threads: Some(2),
-            ..TranscribeOpts::default()
-        };
+        let opts = TranscribeOpts::default();
         if let Err(e) = self.transcribe(&silence, &opts) {
             tracing::debug!(error = %e, "warm-up decode failed");
         }

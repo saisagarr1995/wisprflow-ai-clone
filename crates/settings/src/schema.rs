@@ -57,6 +57,10 @@ pub enum HotkeyMode {
     Hold,
     /// Press once to start, again to stop.
     Toggle,
+    /// Hands-free: press once (or click the HUD pill) to start; recording
+    /// finishes on its own after a couple of seconds of silence. A second
+    /// press also stops it, like Toggle.
+    HandsFree,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -84,6 +88,12 @@ pub struct SttConfig {
     pub engine: SttEngineKind,
     /// Model id from the `openflow-models` registry.
     pub model_id: String,
+    /// Offload the final decode to the GPU (needs a build with the
+    /// `gpu-vulkan` feature). Off by default: integrated GPUs without
+    /// matrix cores (e.g. Vega iGPUs) decode whisper SLOWER than the CPU —
+    /// measured 10 s vs 5 s on a Ryzen 4700U. Worth enabling on discrete
+    /// NVIDIA/AMD/Intel Arc cards.
+    pub gpu: bool,
 }
 
 impl Default for SttConfig {
@@ -94,6 +104,7 @@ impl Default for SttConfig {
         Self {
             engine: SttEngineKind::Auto,
             model_id: "whisper-base".into(),
+            gpu: false,
         }
     }
 }
