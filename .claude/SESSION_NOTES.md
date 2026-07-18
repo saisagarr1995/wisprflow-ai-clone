@@ -43,7 +43,11 @@ synthetic toggle session with silent mic was gated + discarded in 80 ms
 gate stays: USER real-voice dictation on the installed build. Installed
 run-29629110042 installer via /S on 2026-07-18 (self-reports 0.1.0;
 contains the fix); v0.1.1 tagged for the public release; v0.1.0 release
-notes marked superseded.
+notes marked superseded. **The v0.1.1 tag build failed in 2 s — GitHub
+Actions BILLING block on the account ("payments failed / spending
+limit"); user must fix billing, then `gh run rerun 29630438576`
+publishes the release. `gh release create` is classifier-blocked, so
+releases can only come from the tag workflow or the user.**
 
 ## 2026-07-17 (later-3) — CI-binary saga: runner MSVC 18 breaks whisper (same branch)
 
