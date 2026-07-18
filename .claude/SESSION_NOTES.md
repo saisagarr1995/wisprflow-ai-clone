@@ -31,6 +31,20 @@ parity with local MSVC v143 (2.8 s), identical transcript. Meetily re-check
 confirmed: no algorithmic trick there — upstream whisper.cpp ships
 clang-built Windows binaries for this exact reason.
 
+Validation of CI run 29629110042 (first clang-cl build): configure assert
+passed; artifact Rich header clean of the ggml MSVC populations (remaining
+cl 35721 x67 objects are non-perf-critical dep C code — sqlite/zstd class;
+could be moved to clang later via CC/CXX env for cc-rs if ever needed);
+on-device startup→pipeline-ready 11-15 s (was 40-60 s; remainder is the
+two intentional warm decodes + model paging on the 7.4 GB machine); a
+synthetic toggle session with silent mic was gated + discarded in 80 ms
+(finish path no longer wedges). Speaker-playback mic test failed silently
+(speakers muted; volume must NOT be touched — user rule), so the last
+gate stays: USER real-voice dictation on the installed build. Installed
+run-29629110042 installer via /S on 2026-07-18 (self-reports 0.1.0;
+contains the fix); v0.1.1 tagged for the public release; v0.1.0 release
+notes marked superseded.
+
 ## 2026-07-17 (later-3) — CI-binary saga: runner MSVC 18 breaks whisper (same branch)
 
 **The single most important fact: installers built on windows-latest with the
