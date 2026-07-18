@@ -4,6 +4,37 @@ Newest first. One entry per working session: what was done, challenges hit,
 how they were solved, and what's next. Keep entries short — this file is
 read at the start of future sessions.
 
+## 2026-07-18 (later) — repo made public + locked down; Actions allowlist broke CI
+
+Repo flipped private→public (secret-scanned full history first, clean) so
+Actions billing works again + so branch-protection rulesets are available
+(GitHub requires public/Pro for repo rulesets). Applied: `protect-main`
+ruleset (PR-only, 1 approval, review threads resolved, required check
+`windows` — the CI job's actual name, not the workflow name `CI`; admin-only
+bypass via `RepositoryRole` actor_id 5) and `protect-tags` (no
+create/delete/move except admin). Actions locked to
+`allowed_actions=selected`: github-owned + verified-creator only, plus an
+explicit pattern allowlist. Secret scanning + push protection + Dependabot
+alerts + private vuln reporting all on.
+
+**Broke CI immediately**: `dtolnay/rust-toolchain@stable` and
+`Swatinem/rust-cache@v2` (used in ci.yml/build-app.yml) are neither
+GitHub-owned nor verified-creator, so the selected-actions allowlist
+rejected them outright — "not allowed" error on every job. Fixed by adding
+explicit patterns `dtolnay/rust-toolchain@*` and `Swatinem/rust-cache@*` to
+`actions/permissions/selected-actions`. **Lesson: when locking Actions to
+`selected`, grep every workflow's `uses:` lines FIRST and allowlist every
+non-GitHub action found — verified-creator status alone doesn't cover
+popular third-party actions like dtolnay's or Swatinem's.**
+
+Also surfaced (not a regression, informational): the `Dependabot Updates`
+workflow fails on a `glib` security advisory it can't auto-fix — lowest
+non-vulnerable version is 0.20.0 but the resolvable version is capped at
+0.18.5 by the dependency graph (transitive via the GTK/webview stack).
+Doesn't block PRs (only `windows` is a required check) but will keep
+showing red in the Actions tab until the GTK-side deps are bumped enough to
+allow glib ≥0.20 — separate task, not urgent.
+
 ## 2026-07-18 — v0.1.0 was STILL the slow CI binary; clang-cl+Ninja pin (same branch)
 
 User reported 30-40 s dictations in all three modes on the installed
